@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv add *)",
+      "Bash(uv run python -c ' *)",
+      "Bash(uv run *)",
+      "Bash(tasklist //FI \"IMAGENAME eq SlideMemo.exe\")",
+      "Bash(taskkill *)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/marella/material-symbols/main/svg/400/outlined/content_copy.svg\" -o content_copy.svg)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/marella/material-symbols/main/svg/400/outlined/check.svg\" -o check.svg)",
+      "Read(//c/Users/choiy/.memo_slide/**)",
+      "Bash(python -c \"import sqlite3,os; p=os.path.expanduser\\('~/.memo_slide/memos.db'\\); c=sqlite3.connect\\(p\\); print\\('memos count:', c.execute\\('SELECT COUNT\\(*\\) FROM memos'\\).fetchone\\(\\)\\); print\\('user_version:', c.execute\\('PRAGMA user_version'\\).fetchone\\(\\)\\); print\\('indexes:', c.execute\\(\\\\\"SELECT name,sql FROM sqlite_master WHERE type='index'\\\\\"\\).fetchall\\(\\)\\); print\\('cols:', [r[1] for r in c.execute\\('PRAGMA table_info\\(memos\\)'\\).fetchall\\(\\)]\\)\")",
+      "Bash(python *)",
+      "Bash(./.venv/Scripts/python.exe -c \"import PyQt6; print\\('PyQt6 ok'\\)\")",
+      "Bash(QT_QPA_PLATFORM=offscreen ./.venv/Scripts/python.exe -c ' *)",
+      "PowerShell(uv sync *)",
+      "PowerShell(uv run *)",
+      "PowerShell(Get-Item \"C:\\\\Users\\\\choiy\\\\OneDrive\\\\바탕 화면\\\\memo\\\\dist\\\\SlideMemo.exe\" | Select-Object Name, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,1\\)}}, LastWriteTime)",
+      "Bash(git add *)"
+    ]
+  }
+}
