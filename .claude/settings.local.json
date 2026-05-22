@@ -16,7 +16,9 @@
       "PowerShell(uv sync *)",
       "PowerShell(uv run *)",
       "PowerShell(Get-Item \"C:\\\\Users\\\\choiy\\\\OneDrive\\\\바탕 화면\\\\memo\\\\dist\\\\SlideMemo.exe\" | Select-Object Name, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,1\\)}}, LastWriteTime)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(pyinstaller --version)",
+      "PowerShell(pyinstaller *)"
     ]
   }
 }

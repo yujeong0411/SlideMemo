@@ -545,22 +545,37 @@ class DragGrip(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(16)
+        self.setFixedHeight(40)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
         self.setToolTip("드래그하여 세로 위치 이동")
         self._press_global = None
         self._start_geom = None
+        icon_path = _resource_path("icon.png")
+        self._icon_pixmap: QPixmap | None = None
+        if icon_path.exists():
+            pm = QPixmap(str(icon_path))
+            if not pm.isNull():
+                self._icon_pixmap = pm.scaled(
+                    30, 30,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#6c7086"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        cx = self.width() / 2
-        cy = self.height() / 2
-        for dx in (-5, 0, 5):
-            for dy in (-3, 3):
-                painter.drawEllipse(int(cx + dx - 1.5), int(cy + dy - 1.5), 3, 3)
+        if self._icon_pixmap is not None:
+            x = (self.width() - self._icon_pixmap.width()) // 2
+            y = (self.height() - self._icon_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self._icon_pixmap)
+        else:
+            painter.setBrush(QColor("#6c7086"))
+            painter.setPen(Qt.PenStyle.NoPen)
+            cx = self.width() / 2
+            cy = self.height() / 2
+            for dx in (-5, 0, 5):
+                for dy in (-3, 3):
+                    painter.drawEllipse(int(cx + dx - 1.5), int(cy + dy - 1.5), 3, 3)
         painter.end()
 
     def mousePressEvent(self, event):  # noqa: N802
@@ -1526,7 +1541,7 @@ def load_app_icon() -> QIcon | None:
 
 def _fallback_tray_icon() -> QIcon:
     """파일 아이콘이 없을 때 동적으로 그리는 fallback."""
-    pixmap = QPixmap(32, 32)
+    pixmap = QPixmap(64, 64)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
