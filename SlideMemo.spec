@@ -6,8 +6,8 @@ tiktoken_datas, tiktoken_binaries, tiktoken_hiddenimports = collect_all('tiktoke
 tiktoken_ext_datas, tiktoken_ext_binaries, tiktoken_ext_hiddenimports = collect_all('tiktoken_ext')
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    ['src/main.py'],
+    pathex=['src'],
     binaries=litellm_binaries + tiktoken_binaries + tiktoken_ext_binaries,
     datas=[('logo.ico', '.'), ('logo.png', '.'), ('assets', 'assets')] + litellm_datas + tiktoken_datas + tiktoken_ext_datas,
     hiddenimports=['keyring.backends', 'keyring.backends.Windows', 'tiktoken_ext', 'tiktoken_ext.openai_public'] + litellm_hiddenimports + tiktoken_hiddenimports + tiktoken_ext_hiddenimports,

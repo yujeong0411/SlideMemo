@@ -3269,8 +3269,11 @@ def _delete_memo_images(html: str) -> None:
 
 
 def _resource_path(name: str) -> Path:
-    """PyInstaller --onefile 실행 시엔 sys._MEIPASS, dev 시엔 main.py 옆을 본다."""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    """PyInstaller --onefile 실행 시엔 sys._MEIPASS, dev 시엔 프로젝트 루트
+    (src/의 부모) — assets/, logo.ico 등이 그곳에 있다."""
+    base = Path(
+        getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
+    )
     return base / name
 
 
