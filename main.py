@@ -10,6 +10,7 @@ from PyQt6.QtCore import (
     Qt,
     QEasingCurve,
     QMimeData,
+    QPoint,
     QPropertyAnimation,
     QRect,
     QSize,
@@ -18,6 +19,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction,
+    QBrush,
     QColor,
     QDesktopServices,
     QFont,
@@ -29,6 +31,7 @@ from PyQt6.QtGui import (
     QPainter,
     QPixmap,
     QShortcut,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextImageFormat,
@@ -45,6 +48,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGraphicsOpacityEffect,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -60,6 +64,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from database import DEFAULT_COLOR, IMAGES_DIR, Memo, MemoDatabase
@@ -84,6 +89,28 @@ MIN_H = 200
 RESIZE_GRIP = 6  # 가장자리 드래그 핸들 두께(px)
 
 WEEKDAYS_KO = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+
+# 8-2 글자색/배경색 팔레트
+TEXT_COLOR_PALETTE = [
+    "#ef4444",  # 빨강
+    "#f97316",  # 주황
+    "#eab308",  # 노랑
+    "#22c55e",  # 초록
+    "#3b82f6",  # 파랑
+    "#a855f7",  # 보라
+    "#ec4899",  # 분홍
+    "#1f2937",  # 검정 (기본 글자색에 가까운 다크)
+]
+BG_COLOR_PALETTE = [
+    "#fef08a",  # 노랑
+    "#fed7aa",  # 주황
+    "#d9f99d",  # 초록
+    "#bfdbfe",  # 파랑
+    "#fbcfe8",  # 분홍
+    "#e9d5ff",  # 보라
+    "#e5e7eb",  # 회색
+    None,       # 기본/투명 (배경 해제)
+]
 
 COLORS = {
     "ivory":    "#FFEF9F",
@@ -649,8 +676,20 @@ class FormatToolbar(QWidget):
         self._add_icon_btn("fmt_italic.svg", "기울임 (Ctrl+I)", self.toggle_italic)
         self._add_icon_btn("fmt_underline.svg", "밑줄 (Ctrl+U)", self.toggle_underline)
         self._add_icon_btn("fmt_strike.svg", "취소선", self.toggle_strike)
+        self._add_color_menu_btn("fmt_text_color.svg", "글자색", kind="text")
+        self._add_color_menu_btn("fmt_bg_color.svg", "배경색", kind="bg")
+        self._add_sep()
         self._add_icon_btn("fmt_bullet.svg", "불릿 목록", self.bullet_list)
         self._add_icon_btn("fmt_numbered.svg", "번호 목록", self.numbered_list)
+        self._add_icon_btn(
+            "fmt_align_left.svg", "왼쪽 정렬", lambda: self.set_alignment("left")
+        )
+        self._add_icon_btn(
+            "fmt_align_center.svg", "가운데 정렬", lambda: self.set_alignment("center")
+        )
+        self._add_icon_btn(
+            "fmt_align_right.svg", "오른쪽 정렬", lambda: self.set_alignment("right")
+        )
         self._add_sep()
         self._add_icon_btn("link_icon.svg", "링크 삽입 (Ctrl+K)", self.insert_link)
         self._add_icon_btn("fmt_table.svg", "표 삽입", self.insert_table)
@@ -716,6 +755,133 @@ class FormatToolbar(QWidget):
     def numbered_list(self) -> None:
         self.editor.textCursor().createList(QTextListFormat.Style.ListDecimal)
         self.editor.setFocus()
+
+    # ----- 정렬 (선택영역 또는 현재 줄) -----
+    def set_alignment(self, where: str) -> None:
+        mapping = {
+            "left": Qt.AlignmentFlag.AlignLeft,
+            "center": Qt.AlignmentFlag.AlignCenter,
+            "right": Qt.AlignmentFlag.AlignRight,
+        }
+        fmt = QTextBlockFormat()
+        fmt.setAlignment(mapping.get(where, Qt.AlignmentFlag.AlignLeft))
+        # mergeBlockFormat은 선택영역이 있으면 그 영역의 모든 블록, 없으면 현재 블록에 적용.
+        self.editor.textCursor().mergeBlockFormat(fmt)
+        self.editor.setFocus()
+
+    # ----- 글자색 / 배경색 (선택영역 필수) -----
+    def _toast_no_selection(self) -> None:
+        win = self.editor.window()
+        if hasattr(win, "_show_toast"):
+            win._show_toast("색을 적용할 텍스트를 먼저 선택하세요.")
+
+    def apply_text_color(self, color_hex: str) -> None:
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            self._toast_no_selection()
+            return
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(color_hex))
+        cursor.mergeCharFormat(fmt)
+        self.editor.setFocus()
+
+    def apply_bg_color(self, color_hex: str | None) -> None:
+        cursor = self.editor.textCursor()
+        if not cursor.hasSelection():
+            self._toast_no_selection()
+            return
+        fmt = QTextCharFormat()
+        if color_hex is None:
+            # 배경 해제 → transparent brush
+            fmt.setBackground(QBrush(Qt.GlobalColor.transparent))
+        else:
+            fmt.setBackground(QColor(color_hex))
+        cursor.mergeCharFormat(fmt)
+        self.editor.setFocus()
+
+    def pick_custom_text_color(self) -> None:
+        chosen = QColorDialog.getColor(
+            QColor("#1f2937"), self, "글자색 선택",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog,
+        )
+        if chosen.isValid():
+            self.apply_text_color(chosen.name())
+
+    def pick_custom_bg_color(self) -> None:
+        chosen = QColorDialog.getColor(
+            QColor("#fef08a"), self, "배경색 선택",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog,
+        )
+        if chosen.isValid():
+            self.apply_bg_color(chosen.name())
+
+    def _add_color_menu_btn(self, svg_name: str, tip: str, *, kind: str) -> QToolButton:
+        """kind='text' or 'bg'. 클릭 시 8색 그리드 + 사용자 정의 메뉴 팝업."""
+        btn = QToolButton(self)
+        btn.setObjectName("fmtBtn")
+        btn.setToolTip(tip)
+        btn.setFixedSize(28, 24)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        icon_path = _asset(svg_name)
+        if icon_path.exists():
+            btn.setIcon(QIcon(str(icon_path)))
+            btn.setIconSize(QSize(16, 16))
+        btn.setMenu(self._build_color_menu(btn, kind))
+        self.layout().addWidget(btn)
+        return btn
+
+    def _build_color_menu(self, anchor: QWidget, kind: str) -> QMenu:
+        palette = TEXT_COLOR_PALETTE if kind == "text" else BG_COLOR_PALETTE
+        menu = QMenu(self)
+
+        # 8 swatches in 4x2 grid
+        grid_w = QWidget()
+        grid = QGridLayout(grid_w)
+        grid.setContentsMargins(6, 6, 6, 6)
+        grid.setSpacing(4)
+        for i, color in enumerate(palette):
+            sw = QPushButton()
+            sw.setFixedSize(22, 22)
+            sw.setCursor(Qt.CursorShape.PointingHandCursor)
+            if color is None:
+                # "기본" / 배경 해제 — 대각선 빗금으로 표시
+                sw.setText("✕")
+                sw.setStyleSheet(
+                    "background: white; color: #888; border: 1px solid rgba(0,0,0,0.2);"
+                    " font-size: 9pt;"
+                )
+                sw.setToolTip("배경 해제")
+            else:
+                sw.setStyleSheet(
+                    f"background: {color}; border: 1px solid rgba(0,0,0,0.2);"
+                )
+                sw.setToolTip(color)
+            sw.clicked.connect(
+                lambda _c, h=color, k=kind: self._on_swatch_clicked(h, k, menu)
+            )
+            grid.addWidget(sw, i // 4, i % 4)
+        wa = QWidgetAction(menu)
+        wa.setDefaultWidget(grid_w)
+        menu.addAction(wa)
+
+        menu.addSeparator()
+        custom_act = menu.addAction("사용자 정의...")
+        if kind == "text":
+            custom_act.triggered.connect(self.pick_custom_text_color)
+        else:
+            custom_act.triggered.connect(self.pick_custom_bg_color)
+        return menu
+
+    def _on_swatch_clicked(self, color_hex: str | None, kind: str, menu: QMenu) -> None:
+        if kind == "text":
+            # 글자색은 None 값이 없지만 안전상 체크
+            if color_hex is not None:
+                self.apply_text_color(color_hex)
+        else:
+            self.apply_bg_color(color_hex)
+        menu.close()
 
     # ----- 구분선 / 드롭다운 헬퍼 -----
     def _add_sep(self) -> None:
