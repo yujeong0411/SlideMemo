@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSlider,
     QTabWidget,
@@ -22,6 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+import autostart
 from ai_provider import (
     AI_KEY_ENABLED,
     AI_KEY_MODEL,
@@ -117,6 +119,15 @@ class SettingsDialog(QDialog):
 
         # 인덱스 탭 설정 그룹
         outer.addWidget(self._build_tab_geometry_group())
+
+        # 시스템 시작 시 자동 실행
+        self._autostart_chk = QCheckBox("시스템 시작 시 자동 실행")
+        outer.addWidget(self._autostart_chk)
+        if not autostart.is_supported():
+            self._autostart_chk.setEnabled(False)
+            unsupported_note = QLabel("※ 현재 OS에서는 지원되지 않습니다.")
+            unsupported_note.setStyleSheet("color: gray; font-size: 9pt;")
+            outer.addWidget(unsupported_note)
 
         outer.addStretch(1)
         return w
@@ -300,6 +311,10 @@ class SettingsDialog(QDialog):
         self._memo_tab_height_slider.setValue(tab_h)
         self._memo_tab_height_lbl.setText(f"{tab_h} px")
 
+        # 자동 실행: OS의 실제 등록 상태가 진실
+        if autostart.is_supported():
+            self._autostart_chk.setChecked(autostart.is_enabled())
+
         # AI
         enabled = self.db.get_setting_str(AI_KEY_ENABLED, "0") == "1"
         provider = self.db.get_setting_str(AI_KEY_PROVIDER, "anthropic")
@@ -430,5 +445,14 @@ class SettingsDialog(QDialog):
         self.db.set_setting_int(
             "memo_tab_height", self._memo_tab_height_slider.value()
         )
+
+        # 자동 실행: 현재 OS 상태와 다르면 set_enabled 호출, 실패하면 알림
+        if autostart.is_supported():
+            want = self._autostart_chk.isChecked()
+            current = autostart.is_enabled()
+            if want != current:
+                ok, msg = autostart.set_enabled(want)
+                if not ok:
+                    QMessageBox.warning(self, "자동 실행", msg)
 
         self.accept()
