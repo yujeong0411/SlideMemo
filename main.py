@@ -21,7 +21,6 @@ from PyQt6.QtGui import (
     QAction,
     QBrush,
     QColor,
-    QDesktopServices,
     QFont,
     QFontDatabase,
     QGuiApplication,
@@ -52,12 +51,16 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLayout,
     QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QSpacerItem,
     QSpinBox,
+    QStyle,
     QSystemTrayIcon,
     QTextBrowser,
     QTextEdit,
@@ -72,7 +75,7 @@ from database import DEFAULT_COLOR, IMAGES_DIR, Memo, MemoDatabase
 
 # ----- 상수 -----
 TAB_WIDTH = 30          # 인덱스 가로 (기본값; 설정에서 조절)
-TAB_WIDTH_MIN = 12
+TAB_WIDTH_MIN = 24
 TAB_WIDTH_MAX = 60
 EXPANDED_WIDTH = 520
 HEIGHT_RATIO = 0.70
@@ -447,6 +450,9 @@ class MemoTabButton(QPushButton):
     side = "right"  # 클래스 변수: 윈도우가 좌/우 전환 시 갱신
     button_height = MEMO_TAB_HEIGHT  # 클래스 변수: 설정에서 조절 시 갱신
 
+    SEL_BAR_WIDTH = 4  # 선택 인디케이터 띠 굵기 (px)
+    SEL_BAR_COLOR = "#4a4a52"  # 어두운 회색 (검정보다 부드럽게)
+
     def __init__(self, memo: Memo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.memo_id = memo.id
@@ -460,6 +466,7 @@ class MemoTabButton(QPushButton):
             self._fg = _text_color_for(self._bg)
         self.memo_title = memo.title.strip() or "(제목 없음)"
         self.is_pinned = memo.is_pinned
+        self._selected = False
         self.setFixedHeight(MemoTabButton.button_height)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         tip = ("📌 " if self.is_pinned else "") + self.memo_title
@@ -467,10 +474,22 @@ class MemoTabButton(QPushButton):
         self.update_style(selected=False)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        # 1) 기본 그리기 (stylesheet 배경/보더)
+        # 1) 기본 그리기 (stylesheet 배경)
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 1.5) 선택 인디케이터 — stylesheet border가 좌/우 모드에서 가시성이 일관되지 않아
+        #     직접 그린다. accent는 본문과 만나는 면 = side의 반대편.
+        if self._selected:
+            accent = "left" if MemoTabButton.side == "right" else "right"
+            bar_w = MemoTabButton.SEL_BAR_WIDTH
+            if accent == "left":
+                bar_rect = QRect(0, 0, bar_w, self.height())
+            else:
+                bar_rect = QRect(self.width() - bar_w, 0, bar_w, self.height())
+            painter.fillRect(bar_rect, QColor(MemoTabButton.SEL_BAR_COLOR))
 
         # 2) 고정 표시 (회전 전, 탭 상단 중앙)
         pin_h = 0
@@ -506,31 +525,30 @@ class MemoTabButton(QPushButton):
         painter.end()
 
     def update_style(self, selected: bool) -> None:
+        # stylesheet은 배경 + 둥근 모서리만 담당. 선택 인디케이터는 paintEvent에서 직접 그림.
+        self._selected = selected
         bg = self._bg
-        fg = self._fg
-        # 본문과 만나는 쪽(accent)은 side 반대편
+        # accent 반대쪽만 둥글게 (선택 시), 미선택 시는 균일 5px
         accent = "left" if MemoTabButton.side == "right" else "right"
         if selected:
-            # 선택 탭: accent 쪽 어두운 보더 + 그쪽 둥근 모서리, 반대쪽은 각짐
             if accent == "left":
                 radius = (
-                    "border-top-left-radius: 5px;"
-                    "border-bottom-left-radius: 5px;"
-                    "border-top-right-radius: 0;"
-                    "border-bottom-right-radius: 0;"
+                    "border-top-left-radius: 0;"
+                    "border-bottom-left-radius: 0;"
+                    "border-top-right-radius: 5px;"
+                    "border-bottom-right-radius: 5px;"
                 )
             else:
                 radius = (
-                    "border-top-right-radius: 5px;"
-                    "border-bottom-right-radius: 5px;"
-                    "border-top-left-radius: 0;"
-                    "border-bottom-left-radius: 0;"
+                    "border-top-right-radius: 0;"
+                    "border-bottom-right-radius: 0;"
+                    "border-top-left-radius: 5px;"
+                    "border-bottom-left-radius: 5px;"
                 )
             self.setStyleSheet(
                 f"QPushButton {{"
                 f"  background: {bg};"
                 f"  border: none;"
-                f"  border-{accent}: 3px solid {fg};"
                 f"  {radius}"
                 f"}}"
             )
@@ -539,13 +557,10 @@ class MemoTabButton(QPushButton):
                 f"QPushButton {{"
                 f"  background: {bg};"
                 f"  border: none;"
-                f"  border-{accent}: 3px solid transparent;"
                 f"  border-radius: 5px;"
                 f"}}"
-                f"QPushButton:hover {{"
-                f"  border-{accent}: 3px solid {fg};"
-                f"}}"
             )
+        self.update()
 
 
 class ColorDot(QPushButton):
@@ -666,15 +681,182 @@ class TableDialog(QDialog):
         return self.rows_spin.value(), self.cols_spin.value(), self.header_check.isChecked()
 
 
+class FlowLayout(QLayout):
+    """가로로 채우다 폭이 부족하면 다음 줄로 wrap. Qt 공식 FlowLayout 기반.
+    추가 보정:
+    - fixed-size 위젯의 sizeHint 우회 (_effective_size)
+    - width<=0인 첫 layout 패스에서 한 줄 높이 fallback (heightForWidth) — 부모 layout이
+      비정상으로 큰 wrap 높이를 받아 윈도우 자식들이 어긋난 위치에 잠시 그려지는
+      "공중부양" 현상 방지."""
+
+    _QWIDGETSIZE_MAX = 16777215
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        margin: int = 0,
+        h_spacing: int = -1,
+        v_spacing: int = -1,
+    ) -> None:
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self._h_spacing = h_spacing
+        self._v_spacing = v_spacing
+        self._items: list = []
+
+    def addItem(self, item) -> None:  # noqa: N802
+        self._items.append(item)
+
+    def addSpacing(self, size: int) -> None:  # noqa: N802
+        self.addItem(
+            QSpacerItem(
+                size, 1,
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum,
+            )
+        )
+
+    def horizontalSpacing(self) -> int:  # noqa: N802
+        if self._h_spacing >= 0:
+            return self._h_spacing
+        return self._smart_spacing(QStyle.PixelMetric.PM_LayoutHorizontalSpacing)
+
+    def verticalSpacing(self) -> int:  # noqa: N802
+        if self._v_spacing >= 0:
+            return self._v_spacing
+        return self._smart_spacing(QStyle.PixelMetric.PM_LayoutVerticalSpacing)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self) -> Qt.Orientation:  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        # 첫 layout 패스에서 width가 결정되기 전 0으로 호출되면 wrap이 극단적으로
+        # 일어나 매우 큰 높이를 반환 → 부모 layout이 그 값을 받아 잠깐 비정상 배치 →
+        # 윈도우 자식 위젯들이 "공중부양"하는 시각 글리치. 한 줄 높이 fallback.
+        if width <= 0:
+            return self._single_row_height()
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def _single_row_height(self) -> int:
+        h = 0
+        for item in self._items:
+            h = max(h, self._effective_size(item).height())
+        margins = self.contentsMargins()
+        return h + margins.top() + margins.bottom()
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(self._effective_size(item))
+        margins = self.contentsMargins()
+        size += QSize(
+            margins.left() + margins.right(),
+            margins.top() + margins.bottom(),
+        )
+        return size
+
+    def _effective_size(self, item) -> QSize:
+        sh = item.sizeHint()
+        w = item.widget()
+        if w is None:
+            return sh
+        width = (
+            w.minimumWidth()
+            if w.minimumWidth() == w.maximumWidth()
+            and w.maximumWidth() < self._QWIDGETSIZE_MAX
+            else sh.width()
+        )
+        height = (
+            w.minimumHeight()
+            if w.minimumHeight() == w.maximumHeight()
+            and w.maximumHeight() < self._QWIDGETSIZE_MAX
+            else sh.height()
+        )
+        return QSize(width, height)
+
+    def _do_layout(self, rect: QRect, *, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(
+            margins.left(), margins.top(),
+            -margins.right(), -margins.bottom(),
+        )
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        for item in self._items:
+            wid = item.widget()
+            space_x = self.horizontalSpacing()
+            if space_x == -1 and wid is not None:
+                space_x = wid.style().layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Horizontal,
+                )
+            space_y = self.verticalSpacing()
+            if space_y == -1 and wid is not None:
+                space_y = wid.style().layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Vertical,
+                )
+            esize = self._effective_size(item)
+            next_x = x + esize.width() + space_x
+            if next_x - space_x > effective.right() and line_height > 0:
+                x = effective.x()
+                y = y + line_height + space_y
+                next_x = x + esize.width() + space_x
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), esize))
+            x = next_x
+            line_height = max(line_height, esize.height())
+        return y + line_height - rect.y() + margins.bottom()
+
+    def _smart_spacing(self, pm) -> int:
+        parent = self.parent()
+        if parent is None:
+            return -1
+        if parent.isWidgetType():
+            return parent.style().pixelMetric(pm, None, parent)
+        return parent.spacing()
+
+
 class FormatToolbar(QWidget):
-    """리치텍스트 서식바: 굵게/기울임/밑줄/취소선 + 불릿/번호 리스트."""
+    """리치텍스트 서식바: 굵게/기울임/밑줄/취소선 + 불릿/번호 리스트.
+    폭이 부족하면 FlowLayout이 자동으로 다음 줄로 wrap한다."""
 
     def __init__(self, editor: QTextEdit, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.editor = editor
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout = FlowLayout(self, margin=0, h_spacing=2, v_spacing=2)
+        sp = self.sizePolicy()
+        sp.setHeightForWidth(True)
+        self.setSizePolicy(sp)
+        # 첫 표시 시 한 줄 높이를 보장해 wrap된 큰 값이 부모로 전파되지 않게 한다.
+        self.setMinimumHeight(24)
 
         self._add_icon_btn("fmt_bold.svg", "굵게 (Ctrl+B)", self.toggle_bold)
         self._add_icon_btn("fmt_italic.svg", "기울임 (Ctrl+I)", self.toggle_italic)
@@ -698,7 +880,14 @@ class FormatToolbar(QWidget):
         self._add_icon_btn("link_icon.svg", "링크 삽입 (Ctrl+K)", self.insert_link)
         self._add_icon_btn("fmt_table.svg", "표 삽입", self.insert_table)
         self._add_datetime_btn()
-        layout.addStretch(1)
+        # FlowLayout은 좌측 정렬 + 자동 wrap이라 stretch가 필요 없다.
+
+    # ----- height for width 위임 (FlowLayout이 폭에 따라 wrap된 높이 계산) -----
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self.layout().heightForWidth(width)
 
     def _add_btn(
         self,
@@ -1038,12 +1227,12 @@ class DragGrip(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(40)
-        self.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setToolTip("드래그하여 세로 위치 이동")
         self._press_global = None
         self._start_geom = None
         self._drag_icon: QIcon | None = None
-        icon_path = _asset("drag_indicator.svg")
+        icon_path = _asset("pan_tool.svg")
         if icon_path.exists():
             self._drag_icon = QIcon(str(icon_path))
 
@@ -1056,7 +1245,8 @@ class DragGrip(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), 5, 5)
         if self._drag_icon is not None and not self._drag_icon.isNull():
-            icon_size = 22
+            # tab_column 폭에 비례 — 너무 작으면 안 보이고 너무 크면 그립 영역 초과
+            icon_size = max(12, min(int(self.width() * 0.55), 32))
             x = (self.width() - icon_size) // 2
             y = (self.height() - icon_size) // 2
             self._drag_icon.paint(painter, QRect(x, y, icon_size, icon_size))
@@ -1073,6 +1263,7 @@ class DragGrip(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press_global = event.globalPosition().toPoint()
             self._start_geom = self.window().geometry()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
         super().mousePressEvent(event)
@@ -1098,6 +1289,7 @@ class DragGrip(QWidget):
         if self._press_global is not None:
             self._press_global = None
             self._start_geom = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
             win = self.window()
             if isinstance(win, SlideMemoWindow):
                 win._save_user_size()
@@ -1207,6 +1399,26 @@ class SlideMemoWindow(QWidget):
         self._position_collapsed()
         self._refresh_memo_tabs(select_first=True)
         self._refresh_ai_bar()
+        # 첫 expand 시 발생하는 lazy init 버벅임을 줄이기 위해 사용자가 안 보는
+        # 사이 (윈도우 show 직전) body 위젯을 offscreen pixmap에 한 번 render.
+        # → editor의 QTextDocument 초기화, stylesheet 적용, FlowLayout 첫 패스,
+        # 폰트 캐시가 미리 트리거된다.
+        self._warm_up_body()
+
+    def _warm_up_body(self) -> None:
+        try:
+            self.body.ensurePolished()
+            self.format_toolbar.ensurePolished()
+            self.editor.ensurePolished()
+            self.title_input.ensurePolished()
+            self.body.layout().activate()
+            warm_size = self._expanded_geometry().size()
+            if warm_size.width() > 0 and warm_size.height() > 0:
+                pix = QPixmap(warm_size)
+                pix.fill(Qt.GlobalColor.transparent)
+                self.body.render(pix)
+        except Exception:
+            pass  # warm-up은 실패해도 앱 동작에 무관
 
     # ----- setup -----
     def _load_tab_geometry(self) -> None:
@@ -1216,6 +1428,17 @@ class SlideMemoWindow(QWidget):
         h = self.db.get_setting_int("memo_tab_height", MEMO_TAB_HEIGHT)
         self.memo_tab_height = max(MEMO_TAB_HEIGHT_MIN, min(h, MEMO_TAB_HEIGHT_MAX))
         MemoTabButton.button_height = self.memo_tab_height
+
+    def _apply_btn_icon_sizes(self) -> None:
+        """tab_width에 따라 컬럼 버튼 아이콘/폰트 크기를 비례 조절.
+        (DragGrip은 paintEvent에서 자체 폭 기반으로 그리므로 자동 반응)"""
+        size = max(12, min(int(self.tab_width * 0.55), 32))
+        self.settings_btn.setIconSize(QSize(size, size))
+        self.trash_btn.setIconSize(QSize(size, size))
+        # new_tab_btn의 "＋" 텍스트 크기도 함께 줄임
+        font = self.new_tab_btn.font()
+        font.setPointSize(max(9, int(size * 0.85)))
+        self.new_tab_btn.setFont(font)
 
     def _load_display_mode(self) -> None:
         """display_mode: 'tray' / 'taskbar' / 'both'."""
@@ -1308,30 +1531,21 @@ class SlideMemoWindow(QWidget):
         ep.setContentsMargins(0, 0, 0, 0)
         ep.setSpacing(4)
 
-        # 제목 입력 (한 줄 전체)
+        # 제목 줄: 제목 입력 + 색상 dot들 + 사용자 정의(+) 가로 배치
         self.title_input = QLineEdit()
         self.title_input.setObjectName("titleInput")
         self.title_input.setPlaceholderText("제목")
         self.title_input.textChanged.connect(self._on_text_changed)
-        ep.addWidget(self.title_input)
 
-        # 에디터 (서식바가 참조하므로 먼저 생성)
-        self.editor = RichPasteTextEdit()
-        self.editor.setObjectName("editor")
-        self.editor.setFont(self.editor_font)
-        self.editor.setAcceptRichText(True)  # 이미지 붙여넣기 + 서식 지원
-        self.editor.textChanged.connect(self._on_text_changed)
-        self.editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.editor.customContextMenuRequested.connect(self._show_editor_context_menu)
-
-        # 서식바: 좌측 = 서식 버튼 / 우측 = 색상 dot + 복사 버튼
-        self.format_toolbar = FormatToolbar(self.editor)
-        fmt_layout = self.format_toolbar.layout()
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(4)
+        title_row.addWidget(self.title_input, stretch=1)
         self.color_buttons: dict[str, ColorDot] = {}
         for name in COLOR_ORDER:
             dot = ColorDot(name)
             dot.clicked.connect(lambda _checked, n=name: self._on_color_changed(n))
-            fmt_layout.addWidget(dot)
+            title_row.addWidget(dot)
             self.color_buttons[name] = dot
         # 사용자 지정 색상 버튼 (+): 클릭 시 색상 선택 다이얼로그
         self.custom_color_btn = QPushButton("+")
@@ -1345,7 +1559,21 @@ class SlideMemoWindow(QWidget):
             " font-weight: bold;"
         )
         self.custom_color_btn.clicked.connect(self._on_custom_color)
-        fmt_layout.addWidget(self.custom_color_btn)
+        title_row.addWidget(self.custom_color_btn)
+        ep.addLayout(title_row)
+
+        # 에디터 (서식바가 참조하므로 먼저 생성)
+        self.editor = RichPasteTextEdit()
+        self.editor.setObjectName("editor")
+        self.editor.setFont(self.editor_font)
+        self.editor.setAcceptRichText(True)  # 이미지 붙여넣기 + 서식 지원
+        self.editor.textChanged.connect(self._on_text_changed)
+        self.editor.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.editor.customContextMenuRequested.connect(self._show_editor_context_menu)
+
+        # 서식바: 서식 버튼들만 + 복사 버튼 (색상 dot/사용자 정의는 제목 줄로 분리)
+        self.format_toolbar = FormatToolbar(self.editor)
+        fmt_layout = self.format_toolbar.layout()
         fmt_layout.addSpacing(6)
         self._copy_icon = QIcon(str(_asset("content_copy.svg")))
         self._check_icon = QIcon(str(_asset("check.svg")))
@@ -1443,7 +1671,6 @@ class SlideMemoWindow(QWidget):
         self.settings_btn.setToolTip("설정")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.setIcon(QIcon(str(_asset("settings_icon.svg"))))
-        self.settings_btn.setIconSize(QSize(20, 20))
         self.settings_btn.clicked.connect(self._open_settings)
         col_layout.addWidget(self.settings_btn)
 
@@ -1453,9 +1680,19 @@ class SlideMemoWindow(QWidget):
         self.trash_btn.setToolTip("휴지통")
         self.trash_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.trash_btn.setIcon(QIcon(str(_asset("delete_icon.svg"))))
-        self.trash_btn.setIconSize(QSize(20, 20))
-        self.trash_btn.clicked.connect(self._enter_trash_mode)
+        self.trash_btn.clicked.connect(self._toggle_trash_mode)
         col_layout.addWidget(self.trash_btn)
+
+        # 휴지통 갯수 배지 (trash_btn 우측 상단에 absolute)
+        self._trash_badge = QLabel(self.trash_btn)
+        self._trash_badge.setObjectName("trashBadge")
+        self._trash_badge.setStyleSheet(
+            "background: #ef4444; color: white;"
+            " border-radius: 7px; font-size: 7pt; font-weight: bold;"
+            " padding: 1px 4px;"
+        )
+        self._trash_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._trash_badge.hide()
 
         self.new_tab_btn = QPushButton("＋")
         self.new_tab_btn.setObjectName("newTabBtn")
@@ -1467,7 +1704,7 @@ class SlideMemoWindow(QWidget):
 
         root.addWidget(self.tab_column)
 
-        # 리사이즈 드래그 핸들 (container 위에 absolute positioning)
+        # 본문 영역 가장자리 드래그 핸들 (펼친 상태에서만 표시)
         self.handle_left = ResizeHandle(self.container, "left")
         self.handle_right = ResizeHandle(self.container, "right")
         self.handle_top = ResizeHandle(self.container, "top")
@@ -1475,10 +1712,14 @@ class SlideMemoWindow(QWidget):
 
         # 좌/우 가장자리 레이아웃 적용
         self._apply_side_layout()
+        # 초기 아이콘/폰트 크기 (tab_width 반응형)
+        self._apply_btn_icon_sizes()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._update_handles()
+        if hasattr(self, "_trash_badge"):
+            self._update_trash_btn()
 
     def _apply_side_layout(self) -> None:
         """side에 따라 [본문][탭] 또는 [탭][본문] 순서로 재배치."""
@@ -1494,7 +1735,11 @@ class SlideMemoWindow(QWidget):
             root.addWidget(self.body, stretch=1)
 
     def _update_handles(self) -> None:
-        """리사이즈 핸들 위치 + 가시성 갱신 (side / 펼침 상태 반영)."""
+        """리사이즈 핸들 위치 + 가시성 갱신 (side / 펼침 상태 반영).
+        - 좌/우 핸들: 펼친 상태에서만 본문 가장자리 폭 조절용
+        - handle_top/bottom: 펼친 상태에서만 본문 영역 위/아래 (tab_column 영역 위에는
+          DragGrip이 위치 이동을 담당하므로 안 깔린다)
+        - tab_col_bottom_grip (col_layout 안의 위젯): + 버튼 아래에 항상 깔림"""
         if not hasattr(self, "handle_left"):
             return
         w = self.container.width()
@@ -1503,27 +1748,26 @@ class SlideMemoWindow(QWidget):
         grip_h = max(0, h - 2 * RESIZE_GRIP)
         show = self.is_expanded
         if self.side == "right":
-            # 본문이 좌측 → 좌측 가장자리가 폭 조절 핸들
+            body_x = 0  # 본문이 좌측에 위치
             self.handle_left.setGeometry(0, RESIZE_GRIP, RESIZE_GRIP, grip_h)
-            self.handle_top.setGeometry(0, 0, body_w, RESIZE_GRIP)
-            self.handle_bottom.setGeometry(0, h - RESIZE_GRIP, body_w, RESIZE_GRIP)
             self.handle_left.setVisible(show)
             self.handle_right.setVisible(False)
         else:
-            # 본문이 우측 → 우측 가장자리가 폭 조절 핸들
-            self.handle_right.setGeometry(w - RESIZE_GRIP, RESIZE_GRIP, RESIZE_GRIP, grip_h)
-            self.handle_top.setGeometry(self.tab_width, 0, body_w, RESIZE_GRIP)
-            self.handle_bottom.setGeometry(self.tab_width, h - RESIZE_GRIP, body_w, RESIZE_GRIP)
+            body_x = self.tab_width  # 본문이 우측에 위치
+            self.handle_right.setGeometry(
+                w - RESIZE_GRIP, RESIZE_GRIP, RESIZE_GRIP, grip_h
+            )
             self.handle_right.setVisible(show)
             self.handle_left.setVisible(False)
+        self.handle_top.setGeometry(body_x, 0, body_w, RESIZE_GRIP)
+        self.handle_bottom.setGeometry(body_x, h - RESIZE_GRIP, body_w, RESIZE_GRIP)
         self.handle_top.setVisible(show)
         self.handle_bottom.setVisible(show)
-        if show:
-            for hw in (
-                self.handle_left, self.handle_right,
-                self.handle_top, self.handle_bottom,
-            ):
-                hw.raise_()
+        for hw in (
+            self.handle_left, self.handle_right,
+            self.handle_top, self.handle_bottom,
+        ):
+            hw.raise_()
 
     def _setup_animation(self) -> None:
         # 윈도우 폭은 즉시 변경하고 body의 opacity만 페이드.
@@ -1547,6 +1791,7 @@ class SlideMemoWindow(QWidget):
         from settings_dialog import SettingsDialog
         dlg = SettingsDialog(self.db, self)
         dlg.exec()
+        self.apply_side_settings()
         self.apply_tab_geometry_settings()
         self.apply_display_mode_settings()
         self._refresh_ai_bar()
@@ -1579,8 +1824,6 @@ class SlideMemoWindow(QWidget):
             ("Ctrl+Shift+;", lambda: self.format_toolbar.insert_datetime("time")),
             ("Ctrl+Alt+;", lambda: self.format_toolbar.insert_datetime("iso")),
             ("Ctrl+Shift+H", lambda: self.format_toolbar.insert_datetime("korean")),
-            # 미리보기
-            ("Ctrl+P", self._show_preview),
             # AI 기능
             ("Ctrl+Alt+S", lambda: self._run_ai_feature("summarize")),
             ("Ctrl+Alt+R", lambda: self._run_ai_feature("rewrite")),
@@ -1593,29 +1836,6 @@ class SlideMemoWindow(QWidget):
         ]:
             sc = QShortcut(QKeySequence(keys), self)
             sc.activated.connect(slot)
-
-    def _show_preview(self) -> None:
-        html = self.editor.toHtml()
-        dlg = QDialog(self)
-        dlg.setWindowTitle("미리보기")
-        dlg.resize(560, 500)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(8, 8, 8, 8)
-        browser = QTextBrowser()
-        browser.setOpenLinks(False)
-        browser.setHtml(html)
-        browser.anchorClicked.connect(
-            lambda url: QDesktopServices.openUrl(url)
-        )
-        # 링크 색상 오버라이드
-        browser.document().setDefaultStyleSheet(
-            "a { color: #89b4fa; text-decoration: underline; }"
-        )
-        layout.addWidget(browser)
-        close_btn = QPushButton("닫기")
-        close_btn.clicked.connect(dlg.close)
-        layout.addWidget(close_btn)
-        dlg.exec()
 
     # ----- AI 컨텍스트 메뉴 -----
     def _show_editor_context_menu(self, pos) -> None:
@@ -1830,6 +2050,23 @@ class SlideMemoWindow(QWidget):
         self.db.set_setting_int("window_height", self.user_height)
         self.db.set_setting_int("window_y", self.user_y)
 
+    def apply_side_settings(self) -> None:
+        """side(좌/우 가장자리) 변경 즉시 반영. toggle_side와 거의 동일하지만
+        DB에서 값을 다시 읽어 적용한다."""
+        new_side_int = self.db.get_setting_int("side", 0)
+        new_side = "left" if new_side_int == 1 else "right"
+        if new_side == self.side:
+            return
+        self.side = new_side
+        self._apply_side_layout()
+        self.setGeometry(
+            self._expanded_geometry() if self.is_expanded
+            else self._collapsed_geometry()
+        )
+        self._update_handles()
+        self._refresh_memo_tabs()
+        self._update_tabs_selected()
+
     def apply_display_mode_settings(self) -> None:
         """display_mode 재로드 후 윈도우 플래그/트레이 가시성 즉시 갱신."""
         prev = self.display_mode
@@ -1863,6 +2100,8 @@ class SlideMemoWindow(QWidget):
         self.tab_column.setFixedWidth(self.tab_width)
         self.container.setMinimumWidth(self.tab_width)
         self.setMinimumWidth(self.tab_width)
+        # 컬럼 버튼 아이콘/폰트 크기 반응형 갱신
+        self._apply_btn_icon_sizes()
         # 각 메모 탭 높이 갱신 → 탭 다시 그리기
         MemoTabButton.button_height = self.memo_tab_height
         self._refresh_memo_tabs()
@@ -1922,6 +2161,10 @@ class SlideMemoWindow(QWidget):
         self.is_expanded = True
         # 윈도우 폭/위치는 즉시 펼침 사이즈로 (tab_column 위치는 변함 없음)
         self.setGeometry(self._expanded_geometry())
+        # body.show() 전에 layout을 강제 activate해 FlowLayout이 정상 폭 기준으로
+        # 첫 패스를 계산하게 한다. 그렇지 않으면 width=0 짧은 순간 wrap된 큰 높이가
+        # 부모 layout으로 전파되어 메모 탭이 잠깐 어긋난 위치에 그려진다.
+        self.body.layout().activate()
         self.body.show()
         self._update_handles()
         # body opacity 0 → 1 페이드 인
@@ -1932,11 +2175,11 @@ class SlideMemoWindow(QWidget):
         self.raise_()
         self.activateWindow()
 
-    def collapse(self) -> None:
+    def collapse(self, *, exit_trash: bool = True) -> None:
         if not self.is_expanded:
             return
         self.save_now()
-        if self.trash_mode:
+        if exit_trash and self.trash_mode:
             self._exit_trash_mode()  # 접을 때 휴지통 모드 해제
         self.is_expanded = False
         # body opacity → 0 페이드 아웃. 끝나면 _on_fade_done에서 윈도우 축소.
@@ -1998,8 +2241,26 @@ class SlideMemoWindow(QWidget):
     def _update_trash_btn(self) -> None:
         n = self.db.count_trashed()
         self.trash_btn.setToolTip(f"휴지통 ({n})" if n else "휴지통")
+        if n > 0:
+            self._trash_badge.setText(str(n) if n < 100 else "99+")
+            self._trash_badge.adjustSize()
+            # trash_btn 우측 상단 — width가 아직 0이면 tab_width를 fallback으로
+            bw = self.trash_btn.width() or self.tab_width
+            self._trash_badge.move(
+                max(2, bw - self._trash_badge.width() - 2), 2
+            )
+            self._trash_badge.show()
+            self._trash_badge.raise_()
+        else:
+            self._trash_badge.hide()
 
     # ----- 휴지통 모드 -----
+    def _toggle_trash_mode(self) -> None:
+        if self.trash_mode:
+            self._exit_trash_mode()
+        else:
+            self._enter_trash_mode()
+
     def _enter_trash_mode(self) -> None:
         if self.trash_mode:
             return
@@ -2015,9 +2276,11 @@ class SlideMemoWindow(QWidget):
         self.search_input.hide()
         self.sort_combo.hide()
         self.back_btn.show()
-        self.trash_btn.hide()
         self.new_tab_btn.hide()
         self._refresh_memo_tabs()
+        # 진입 시 펼침 상태였다면 접음 (휴지통 메모 클릭하면 다시 펼치며 미리보기)
+        if self.is_expanded:
+            self.collapse(exit_trash=False)
 
     def _exit_trash_mode(self) -> None:
         if not self.trash_mode:
@@ -2029,7 +2292,6 @@ class SlideMemoWindow(QWidget):
         self.back_btn.hide()
         self.search_input.show()
         self.sort_combo.show()
-        self.trash_btn.show()
         self.new_tab_btn.show()
         # 휴지통 진입 전에 보던 메모로 에디터 복원
         if self.current_memo is not None:
@@ -2051,6 +2313,10 @@ class SlideMemoWindow(QWidget):
 
     def _preview_trashed(self, memo_id: int) -> None:
         """휴지통 메모 내용을 읽기 전용으로 에디터에 표시 (current_memo는 안 건드림)."""
+        # 이미 같은 메모 미리보기 중이고 펼친 상태면 토글로 접기
+        if self._trash_preview_id == memo_id and self.is_expanded:
+            self.collapse(exit_trash=False)
+            return
         try:
             memo = self.db.get(memo_id)
         except KeyError:
@@ -2448,6 +2714,7 @@ def make_tray_icon(window: SlideMemoWindow, icon: QIcon | None = None) -> QSyste
     settings_act = QAction("⚙ 설정", menu)
     def _open_settings_from_tray() -> None:
         SettingsDialog(window.db, window).exec()
+        window.apply_side_settings()
         window.apply_tab_geometry_settings()
         window.apply_display_mode_settings()
         window._refresh_ai_bar()

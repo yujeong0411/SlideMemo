@@ -112,9 +112,6 @@ class SettingsDialog(QDialog):
         self._side_combo.addItem("오른쪽 가장자리", 0)
         self._side_combo.addItem("왼쪽 가장자리", 1)
         side_form.addRow("앱 위치:", self._side_combo)
-        note = QLabel("※ 위치 변경은 앱 재시작 후 적용됩니다.")
-        note.setStyleSheet("color: gray; font-size: 9pt;")
-        side_form.addRow("", note)
 
         self._display_mode_combo = QComboBox()
         self._display_mode_combo.addItem("트레이만 (작업표시줄에 안 뜸)", "tray")
@@ -144,9 +141,9 @@ class SettingsDialog(QDialog):
         form = QFormLayout(group)
         form.setVerticalSpacing(10)
 
-        # 가로 폭 슬라이더 (12 ~ 60 px) — 각 메모 탭(슬라이드 노출 폭)
+        # 가로 폭 슬라이더 (24 ~ 60 px) — 각 메모 탭(슬라이드 노출 폭)
         self._tab_width_slider = QSlider(Qt.Orientation.Horizontal)
-        self._tab_width_slider.setRange(12, 60)
+        self._tab_width_slider.setRange(24, 60)
         self._tab_width_slider.setSingleStep(1)
         self._tab_width_slider.setPageStep(4)
         self._tab_width_lbl = QLabel("30 px")
@@ -316,7 +313,7 @@ class SettingsDialog(QDialog):
         self._display_mode_combo.setCurrentIndex(max(0, idx))
 
         # 인덱스 탭 설정 (값/범위는 main.py 상수와 동일)
-        tab_w = max(12, min(self.db.get_setting_int("tab_width", 30), 60))
+        tab_w = max(24, min(self.db.get_setting_int("tab_width", 30), 60))
         self._tab_width_slider.setValue(tab_w)
         self._tab_width_lbl.setText(f"{tab_w} px")
         tab_h = max(60, min(self.db.get_setting_int("memo_tab_height", 116), 200))
