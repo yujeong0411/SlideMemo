@@ -11,12 +11,14 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QTabWidget,
     QVBoxLayout,
@@ -181,6 +183,8 @@ class SettingsDialog(QDialog):
 
     # ── AI 탭 ────────────────────────────────────────────────────
     def _build_ai_tab(self) -> QWidget:
+        # 내용물이 길어서 탭 자체를 스크롤 영역으로 감싼다 — 다른 탭(일반/정보)의
+        # 작은 높이에 맞춰 다이얼로그 전체 크기가 결정되도록.
         w = QWidget()
         outer = QVBoxLayout(w)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -322,6 +326,17 @@ class SettingsDialog(QDialog):
         self._whisper_test_lbl.setWordWrap(True)
         outer.addWidget(self._whisper_test_lbl)
 
+        # OpenAI 키 발급 페이지 링크
+        whisper_key_help = QLabel(
+            '<a href="https://platform.openai.com/api-keys">OpenAI API 키 발급 페이지 →</a>'
+        )
+        whisper_key_help.setOpenExternalLinks(False)
+        whisper_key_help.linkActivated.connect(
+            lambda url: QDesktopServices.openUrl(QUrl(url))
+        )
+        whisper_key_help.setStyleSheet("font-size: 9pt;")
+        outer.addWidget(whisper_key_help)
+
         rec_note = QLabel(
             "※ AI 제공자가 OpenAI라면 위 키와 같은 저장소를 공유합니다. "
             "Whisper API 비용: 분당 약 $0.006. 마이크 권한 필요."
@@ -334,7 +349,30 @@ class SettingsDialog(QDialog):
 
         # 마스터 토글 연결
         self._ai_enabled_chk.toggled.connect(self._ai_body.setEnabled)
-        return w
+        # QScrollArea로 감싸 다이얼로그 자체 높이가 길어지지 않도록
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # viewport 회색 배경 제거 — 다른 탭(일반/정보)과 같은 시스템 배경
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollArea QScrollBar:vertical {"
+            "  background: rgba(0,0,0,0.04); width: 6px; margin: 0;"
+            "}"
+            "QScrollArea QScrollBar::handle:vertical {"
+            "  background: rgba(0,0,0,0.35); border-radius: 3px;"
+            "  min-height: 20px;"
+            "}"
+            "QScrollArea QScrollBar::handle:vertical:hover {"
+            "  background: rgba(0,0,0,0.55);"
+            "}"
+            "QScrollArea QScrollBar::add-line:vertical,"
+            " QScrollArea QScrollBar::sub-line:vertical { height: 0; }"
+        )
+        scroll.setWidget(w)
+        return scroll
 
     # ── 정보 탭 ──────────────────────────────────────────────────
     def _build_info_tab(self) -> QWidget:
@@ -343,8 +381,16 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         layout.addWidget(QLabel("<b>Slide Memo</b>"))
-        layout.addWidget(QLabel("버전: 0.1.0"))
+        layout.addWidget(QLabel("버전: 0.2.0"))
         layout.addWidget(QLabel("PyQt6 기반 Windows 슬라이드 메모장"))
+        layout.addSpacing(8)
+        copyright_lbl = QLabel(
+            "© 2026 최유정. All Rights Reserved.<br>"
+            "무단 복제·배포·수정을 금합니다."
+        )
+        copyright_lbl.setStyleSheet("font-size: 9pt; color: #555;")
+        copyright_lbl.setWordWrap(True)
+        layout.addWidget(copyright_lbl)
         layout.addSpacing(8)
         db_lbl = QLabel(f"데이터 위치: {self.db.db_path.parent}")
         db_lbl.setStyleSheet("font-size: 9pt; color: gray;")

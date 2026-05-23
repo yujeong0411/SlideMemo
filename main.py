@@ -3369,6 +3369,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Slide Memo")
+    # 앱 전역 UI 폰트 — 시스템에 Pretendard가 있으면 사용, 없으면 Qt가 자동 fallback
+    # (메모 본문/제목/탭의 폰트는 _setup_fonts와 _apply_app_font로 별도 관리됨)
+    _families = set(QFontDatabase.families())
+    if "Pretendard" in _families:
+        app.setFont(QFont("Pretendard", 9))
 
     app_icon = load_app_icon()
     if app_icon is not None:
