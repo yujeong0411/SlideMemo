@@ -2813,10 +2813,23 @@ class SlideMemoWindow(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+            # 삭제 전 이웃 메모 (일반 모드와 같은 패턴)
+            trashed = self.db.list_trashed_memos()
+            ids = [m.id for m in trashed]
+            neighbor: Memo | None = None
+            if memo_id in ids:
+                idx = ids.index(memo_id)
+                if idx > 0:
+                    neighbor = trashed[idx - 1]
+                elif len(trashed) > 1:
+                    neighbor = trashed[1]
             _delete_memo_images(memo.content)
             self.db.delete(memo_id)
             self._trash_preview_id = None
             self._after_trash_change()
+            # 휴지통이 비어있으면 _after_trash_change가 일반 모드로 복귀 → 그땐 패스
+            if self.trash_mode and neighbor is not None:
+                self._preview_trashed(neighbor.id)
             return
         # 일반 모드: 현재 메모 → 휴지통
         if self.current_memo is None:
@@ -2905,11 +2918,23 @@ class SlideMemoWindow(QWidget):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+            # 삭제 전 이웃 메모 — 미리보기 자동 이동용
+            trashed = self.db.list_trashed_memos()
+            ids = [m.id for m in trashed]
+            neighbor: Memo | None = None
+            if memo_id in ids:
+                idx = ids.index(memo_id)
+                if idx > 0:
+                    neighbor = trashed[idx - 1]
+                elif len(trashed) > 1:
+                    neighbor = trashed[1]
             _delete_memo_images(memo.content)
             self.db.delete(memo_id)
             if self._trash_preview_id == memo_id:
                 self._trash_preview_id = None
             self._after_trash_change()
+            if self.trash_mode and neighbor is not None:
+                self._preview_trashed(neighbor.id)
 
     def _update_tabs_selected(self) -> None:
         current_id = self.current_memo.id if self.current_memo else None
