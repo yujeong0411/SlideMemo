@@ -1596,6 +1596,14 @@ class SlideMemoWindow(QWidget):
         self.back_btn.hide()
         top.addWidget(self.back_btn, stretch=1)
 
+        # 휴지통 전체 비우기 버튼 (휴지통 모드에서만 표시)
+        self.trash_empty_btn = QPushButton("🗑 전체 비우기")
+        self.trash_empty_btn.setObjectName("backBtn")
+        self.trash_empty_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.trash_empty_btn.clicked.connect(self._empty_trash)
+        self.trash_empty_btn.hide()
+        top.addWidget(self.trash_empty_btn)
+
         # 정렬 드롭다운
         self.sort_combo = QComboBox()
         self.sort_combo.setObjectName("sortCombo")
@@ -1908,6 +1916,8 @@ class SlideMemoWindow(QWidget):
             ("Ctrl+Shift+;", lambda: self.format_toolbar.insert_datetime("time")),
             ("Ctrl+Alt+;", lambda: self.format_toolbar.insert_datetime("iso")),
             ("Ctrl+Shift+H", lambda: self.format_toolbar.insert_datetime("korean")),
+            # 메모 삭제 (모드별로 다른 동작)
+            ("Ctrl+Shift+D", self._delete_current_memo),
             # AI 기능
             ("Ctrl+Alt+S", lambda: self._run_ai_feature("summarize")),
             ("Ctrl+Alt+T", lambda: self._run_ai_feature("translate")),
@@ -2522,6 +2532,7 @@ class SlideMemoWindow(QWidget):
         self.search_input.hide()
         self.sort_combo.hide()
         self.back_btn.show()
+        self.trash_empty_btn.show()
         self.new_tab_btn.hide()
         self._refresh_memo_tabs()
         # 진입 시 펼침 상태였다면 접음 (휴지통 메모 클릭하면 다시 펼치며 미리보기)
@@ -2536,6 +2547,7 @@ class SlideMemoWindow(QWidget):
         self.editor.setReadOnly(False)
         self.title_input.setReadOnly(False)
         self.back_btn.hide()
+        self.trash_empty_btn.hide()
         self.search_input.show()
         self.sort_combo.show()
         self.new_tab_btn.show()
@@ -2556,6 +2568,85 @@ class SlideMemoWindow(QWidget):
             self._exit_trash_mode()  # 빈 화면 대신 일반 모드로 자동 복귀
         else:
             self._refresh_memo_tabs()
+
+    def _empty_trash(self) -> None:
+        """휴지통 모드에서 호출. 휴지통 전체 메모 + 첨부 이미지 영구 삭제."""
+        n = self.db.count_trashed()
+        if n == 0:
+            return
+        reply = QMessageBox.question(
+            self,
+            "휴지통 전체 비우기",
+            f"휴지통의 모든 메모({n}개)를 영구 삭제합니다.\n"
+            "첨부 이미지도 함께 삭제되며 복구할 수 없습니다.\n계속할까요?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        for memo in self.db.list_trashed_memos():
+            _delete_memo_images(memo.content)
+            self.db.delete(memo.id)
+        self._trash_preview_id = None
+        self._exit_trash_mode()
+        self._show_toast(f"휴지통을 비웠습니다 ({n}개 삭제).")
+
+    def _delete_current_memo(self) -> None:
+        """Ctrl+Shift+D 단축키. 모드에 따라 다른 동작:
+        - 일반 모드: 현재 편집 중인 메모를 휴지통으로 이동
+        - 휴지통 모드: 미리보기 중인 메모를 영구 삭제"""
+        if self.trash_mode:
+            memo_id = self._trash_preview_id
+            if memo_id is None:
+                self._show_toast("삭제할 메모를 먼저 클릭하세요.")
+                return
+            try:
+                memo = self.db.get(memo_id)
+            except KeyError:
+                return
+            reply = QMessageBox.question(
+                self,
+                "영구 삭제 확인",
+                f"'{memo.title or '(제목 없음)'}' 메모를 완전히 삭제할까요?\n"
+                "첨부 이미지도 함께 삭제되며 복구할 수 없습니다.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            _delete_memo_images(memo.content)
+            self.db.delete(memo_id)
+            self._trash_preview_id = None
+            self._after_trash_change()
+            return
+        # 일반 모드: 현재 메모 → 휴지통
+        if self.current_memo is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "삭제 확인",
+            "이 메모를 휴지통으로 보낼까요?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        memo_id = self.current_memo.id
+        all_memos = self.db.list_all(sort=self._current_sort_key())
+        ids = [m.id for m in all_memos]
+        neighbor: Memo | None = None
+        if memo_id in ids:
+            idx = ids.index(memo_id)
+            if idx > 0:
+                neighbor = all_memos[idx - 1]
+            elif len(all_memos) > 1:
+                neighbor = all_memos[1]
+        self.db.soft_delete(memo_id)
+        self.current_memo = None
+        self._refresh_memo_tabs()
+        if neighbor is not None:
+            self._load_memo(neighbor)
+            self._update_tabs_selected()
+        else:
+            self.collapse()
+            self._clear_editor()
 
     def _preview_trashed(self, memo_id: int) -> None:
         """휴지통 메모 내용을 읽기 전용으로 에디터에 표시 (current_memo는 안 건드림)."""
