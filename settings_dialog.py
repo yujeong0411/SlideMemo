@@ -105,7 +105,7 @@ class SettingsDialog(QDialog):
         outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(12)
 
-        # 앱 위치
+        # 앱 위치 + 표시 방식
         side_form = QFormLayout()
         side_form.setVerticalSpacing(8)
         self._side_combo = QComboBox()
@@ -115,6 +115,13 @@ class SettingsDialog(QDialog):
         note = QLabel("※ 위치 변경은 앱 재시작 후 적용됩니다.")
         note.setStyleSheet("color: gray; font-size: 9pt;")
         side_form.addRow("", note)
+
+        self._display_mode_combo = QComboBox()
+        self._display_mode_combo.addItem("트레이만 (작업표시줄에 안 뜸)", "tray")
+        self._display_mode_combo.addItem("작업표시줄만 (트레이 X)", "taskbar")
+        self._display_mode_combo.addItem("둘 다 표시", "both")
+        side_form.addRow("앱 표시 방식:", self._display_mode_combo)
+
         outer.addLayout(side_form)
 
         # 인덱스 탭 설정 그룹
@@ -302,6 +309,11 @@ class SettingsDialog(QDialog):
         # 일반
         side = self.db.get_setting_int("side", 0)
         self._side_combo.setCurrentIndex(1 if side == 1 else 0)
+        mode = self.db.get_setting_str("display_mode", "tray")
+        if mode not in ("tray", "taskbar", "both"):
+            mode = "tray"
+        idx = self._display_mode_combo.findData(mode)
+        self._display_mode_combo.setCurrentIndex(max(0, idx))
 
         # 인덱스 탭 설정 (값/범위는 main.py 상수와 동일)
         tab_w = max(12, min(self.db.get_setting_int("tab_width", 30), 60))
@@ -439,6 +451,9 @@ class SettingsDialog(QDialog):
             AI_KEY_SHOW_PREVIEW, "1" if self._preview_chk.isChecked() else "0"
         )
         self.db.set_setting_int("side", self._side_combo.currentData())
+        self.db.set_setting_str(
+            "display_mode", self._display_mode_combo.currentData() or "tray"
+        )
 
         # 인덱스 탭 설정
         self.db.set_setting_int("tab_width", self._tab_width_slider.value())

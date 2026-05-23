@@ -83,6 +83,10 @@ MEMO_TAB_HEIGHT_MIN = 60
 MEMO_TAB_HEIGHT_MAX = 200
 NEW_TAB_HEIGHT = 44
 
+# 8-4 표시 방식: tray=트레이만(Tool 플래그) / taskbar=작업표시줄만 / both=둘 다
+DISPLAY_MODE_DEFAULT = "tray"
+DISPLAY_MODES = ("tray", "taskbar", "both")
+
 # 리사이즈
 MIN_W = 280
 MIN_H = 200
@@ -1186,6 +1190,7 @@ class SlideMemoWindow(QWidget):
         self.side = "left" if db.get_setting_int("side", 0) == 1 else "right"
 
         self._load_tab_geometry()  # tab_width 등을 _setup_window/_build_ui 전에 결정
+        self._load_display_mode()  # Tool 플래그 결정에 필요
         self._setup_window()
         self._setup_fonts()
         self._build_ui()
@@ -1212,12 +1217,24 @@ class SlideMemoWindow(QWidget):
         self.memo_tab_height = max(MEMO_TAB_HEIGHT_MIN, min(h, MEMO_TAB_HEIGHT_MAX))
         MemoTabButton.button_height = self.memo_tab_height
 
-    def _setup_window(self) -> None:
-        self.setWindowFlags(
+    def _load_display_mode(self) -> None:
+        """display_mode: 'tray' / 'taskbar' / 'both'."""
+        m = self.db.get_setting_str("display_mode", DISPLAY_MODE_DEFAULT)
+        self.display_mode = m if m in DISPLAY_MODES else DISPLAY_MODE_DEFAULT
+
+    def _window_flags_for_mode(self) -> Qt.WindowType:
+        """display_mode에 맞는 윈도우 플래그 조합."""
+        flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
+        # Tool 플래그가 있으면 작업표시줄에 안 뜸 (트레이 전용에 적합).
+        if self.display_mode == "tray":
+            flags |= Qt.WindowType.Tool
+        return flags
+
+    def _setup_window(self) -> None:
+        self.setWindowFlags(self._window_flags_for_mode())
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet(STYLE)
         self.setWindowTitle("Slide Memo")
@@ -1531,6 +1548,7 @@ class SlideMemoWindow(QWidget):
         dlg = SettingsDialog(self.db, self)
         dlg.exec()
         self.apply_tab_geometry_settings()
+        self.apply_display_mode_settings()
         self._refresh_ai_bar()
 
     def _refresh_ai_bar(self) -> None:
@@ -1811,6 +1829,30 @@ class SlideMemoWindow(QWidget):
         self.db.set_setting_int("window_width", self.user_width)
         self.db.set_setting_int("window_height", self.user_height)
         self.db.set_setting_int("window_y", self.user_y)
+
+    def apply_display_mode_settings(self) -> None:
+        """display_mode 재로드 후 윈도우 플래그/트레이 가시성 즉시 갱신."""
+        prev = self.display_mode
+        self._load_display_mode()
+        if self.display_mode == prev:
+            return
+        was_visible = self.isVisible()
+        self.setWindowFlags(self._window_flags_for_mode())
+        # 트레이 가시성
+        tray = getattr(self, "_tray", None)
+        if tray is not None:
+            if self.display_mode == "taskbar":
+                tray.hide()
+            else:
+                tray.show()
+        # setWindowFlags 호출 후엔 윈도우가 hide되므로 show 재호출 + geometry 복구
+        if was_visible:
+            if self.is_expanded:
+                self.setGeometry(self._expanded_geometry())
+            else:
+                self.setGeometry(self._collapsed_geometry())
+            self.show()
+            self._update_handles()
 
     def apply_tab_geometry_settings(self) -> None:
         """설정 다이얼로그 OK 후 호출. 인덱스 탭 폭/각 탭 높이를 DB에서 재로드해 반영.
@@ -2407,6 +2449,7 @@ def make_tray_icon(window: SlideMemoWindow, icon: QIcon | None = None) -> QSyste
     def _open_settings_from_tray() -> None:
         SettingsDialog(window.db, window).exec()
         window.apply_tab_geometry_settings()
+        window.apply_display_mode_settings()
         window._refresh_ai_bar()
 
     settings_act.triggered.connect(_open_settings_from_tray)
@@ -2425,11 +2468,26 @@ def make_tray_icon(window: SlideMemoWindow, icon: QIcon | None = None) -> QSyste
     return tray
 
 
+def _set_windows_app_user_model_id() -> None:
+    """Windows 작업표시줄이 logo.ico를 쓰게 한다.
+    AppUserModelID를 명시 안 하면 호스트(python.exe) 아이콘이 표시됨."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "anthropic.slidememo.app"
+        )
+    except (OSError, AttributeError):
+        pass  # 구버전 Windows 등 — 아이콘이 기본값으로 떨어지더라도 앱은 정상 동작
+
+
 def main() -> int:
     # HiDPI 환경에서 좌표/스케일 어긋남 방지 (QApplication 생성 전에 호출)
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
+    _set_windows_app_user_model_id()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Slide Memo")
