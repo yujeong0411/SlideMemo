@@ -274,6 +274,62 @@ class SettingsDialog(QDialog):
         self._test_result_lbl.setStyleSheet("font-size: 9pt;")
         outer.addWidget(self._test_result_lbl)
 
+        # 음성 녹음 (Whisper) 그룹
+        sep2 = QWidget()
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet("background: rgba(0,0,0,0.12);")
+        outer.addWidget(sep2)
+        rec_header = QLabel("── 음성 녹음 (Whisper) ──")
+        rec_header.setStyleSheet("color: gray; font-size: 9pt;")
+        outer.addWidget(rec_header)
+        self._recording_enabled_chk = QCheckBox("음성 녹음 기능 사용 (마이크 버튼 활성화)")
+        outer.addWidget(self._recording_enabled_chk)
+        self._recording_keep_chk = QCheckBox("녹음 파일을 메모에 첨부")
+        outer.addWidget(self._recording_keep_chk)
+        rec_max_row = QHBoxLayout()
+        rec_max_row.addWidget(QLabel("최대 녹음 시간 (초):"))
+        from PyQt6.QtWidgets import QSpinBox
+        self._recording_max_spin = QSpinBox()
+        self._recording_max_spin.setRange(60, 600)
+        self._recording_max_spin.setSingleStep(30)
+        self._recording_max_spin.setValue(300)
+        rec_max_row.addWidget(self._recording_max_spin)
+        rec_max_row.addStretch(1)
+        outer.addLayout(rec_max_row)
+
+        # Whisper 전용 OpenAI 키 입력 (메인 AI 제공자와 별개로 등록 가능)
+        whisper_key_row = QHBoxLayout()
+        self._whisper_key_edit = QLineEdit()
+        self._whisper_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._whisper_key_edit.setPlaceholderText("Whisper용 OpenAI API 키")
+        whisper_key_row.addWidget(self._whisper_key_edit)
+        self._whisper_eye_btn = QPushButton("👁")
+        self._whisper_eye_btn.setFixedWidth(30)
+        self._whisper_eye_btn.setCheckable(True)
+        self._whisper_eye_btn.toggled.connect(
+            lambda on: self._whisper_key_edit.setEchoMode(
+                QLineEdit.EchoMode.Normal if on else QLineEdit.EchoMode.Password
+            )
+        )
+        whisper_key_row.addWidget(self._whisper_eye_btn)
+        self._whisper_test_btn = QPushButton("테스트")
+        self._whisper_test_btn.setFixedWidth(60)
+        self._whisper_test_btn.clicked.connect(self._run_whisper_test)
+        whisper_key_row.addWidget(self._whisper_test_btn)
+        outer.addLayout(whisper_key_row)
+        self._whisper_test_lbl = QLabel()
+        self._whisper_test_lbl.setStyleSheet("font-size: 9pt;")
+        self._whisper_test_lbl.setWordWrap(True)
+        outer.addWidget(self._whisper_test_lbl)
+
+        rec_note = QLabel(
+            "※ AI 제공자가 OpenAI라면 위 키와 같은 저장소를 공유합니다. "
+            "Whisper API 비용: 분당 약 $0.006. 마이크 권한 필요."
+        )
+        rec_note.setStyleSheet("color: gray; font-size: 9pt;")
+        rec_note.setWordWrap(True)
+        outer.addWidget(rec_note)
+
         outer.addStretch(1)
 
         # 마스터 토글 연결
@@ -353,6 +409,19 @@ class SettingsDialog(QDialog):
         self._ai_body.setEnabled(enabled)
         self._preview_chk.setChecked(show_preview)
 
+        # 음성 녹음 설정
+        self._recording_enabled_chk.setChecked(
+            self.db.get_setting_int("recording_enabled", 0) == 1
+        )
+        self._recording_keep_chk.setChecked(
+            self.db.get_setting_int("recording_keep_audio", 0) == 1
+        )
+        max_s = self.db.get_setting_int("recording_max_seconds", 300)
+        self._recording_max_spin.setValue(max(60, min(max_s, 600)))
+        # Whisper용 OpenAI 키 (메인 provider와 별개)
+        self._whisper_original_key = load_api_key("openai") or ""
+        self._whisper_key_edit.setText(self._whisper_original_key)
+
         self._check_monthly_reset()
         tokens = int(self.db.get_setting_str(AI_KEY_USAGE_TOKENS, "0") or "0")
         self._update_usage_lbl(tokens, provider)
@@ -426,6 +495,31 @@ class SettingsDialog(QDialog):
         self._test_result_lbl.setStyleSheet(f"font-size: 9pt; color: {color};")
         self._test_result_lbl.setText(msg)
 
+    def _run_whisper_test(self) -> None:
+        key = self._whisper_key_edit.text().strip()
+        if not key:
+            self._whisper_test_lbl.setStyleSheet("color: gray; font-size: 9pt;")
+            self._whisper_test_lbl.setText("키를 입력하세요.")
+            return
+        self._whisper_test_btn.setEnabled(False)
+        self._whisper_test_lbl.setStyleSheet("color: gray; font-size: 9pt;")
+        self._whisper_test_lbl.setText("⏳ 테스트 중...")
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=key)
+            client.models.list()
+            self._whisper_test_lbl.setStyleSheet(
+                "color: #2d8a4e; font-size: 9pt;"
+            )
+            self._whisper_test_lbl.setText("✓ OpenAI 키 유효")
+        except Exception as e:
+            self._whisper_test_lbl.setStyleSheet(
+                "color: #c0392b; font-size: 9pt;"
+            )
+            self._whisper_test_lbl.setText(f"실패: {type(e).__name__}: {e}")
+        finally:
+            self._whisper_test_btn.setEnabled(True)
+
     def _reset_usage(self) -> None:
         self.db.set_setting_str(AI_KEY_USAGE_TOKENS, "0")
         self.db.set_setting_str(AI_KEY_USAGE_RESET, datetime.now().strftime("%Y-%m"))
@@ -481,5 +575,25 @@ class SettingsDialog(QDialog):
             "clipboard_capture_enabled",
             1 if self._clipboard_capture_chk.isChecked() else 0,
         )
+
+        # 음성 녹음
+        self.db.set_setting_int(
+            "recording_enabled",
+            1 if self._recording_enabled_chk.isChecked() else 0,
+        )
+        self.db.set_setting_int(
+            "recording_keep_audio",
+            1 if self._recording_keep_chk.isChecked() else 0,
+        )
+        self.db.set_setting_int(
+            "recording_max_seconds", self._recording_max_spin.value()
+        )
+        # Whisper 키 — 변경됐을 때만 keyring 갱신
+        whisper_key = self._whisper_key_edit.text().strip()
+        if whisper_key != self._whisper_original_key:
+            if self._whisper_original_key:
+                delete_api_key("openai")
+            if whisper_key:
+                save_api_key("openai", whisper_key)
 
         self.accept()

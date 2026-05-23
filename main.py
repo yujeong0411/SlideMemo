@@ -893,7 +893,16 @@ class FormatToolbar(QWidget):
         self._add_icon_btn("link_icon.svg", "링크 삽입 (Ctrl+K)", self.insert_link)
         self._add_icon_btn("fmt_table.svg", "표 삽입", self.insert_table)
         self._add_datetime_btn()
+        # 음성 녹음 (Phase 9-2) — 부모 윈도우의 toggle_recording 호출
+        self.mic_btn = self._add_icon_btn(
+            "fmt_mic.svg", "음성 녹음 (시작/종료)", self._on_mic_clicked
+        )
         # FlowLayout은 좌측 정렬 + 자동 wrap이라 stretch가 필요 없다.
+
+    def _on_mic_clicked(self) -> None:
+        win = self.editor.window()
+        if hasattr(win, "toggle_recording"):
+            win.toggle_recording()
 
     # ----- height for width 위임 (FlowLayout이 폭에 따라 wrap된 높이 계산) -----
     def hasHeightForWidth(self) -> bool:  # noqa: N802
@@ -1391,6 +1400,10 @@ class SlideMemoWindow(QWidget):
         self._quitting = False
         self._ai_worker: object | None = None
         self._ai_pending: str | None = None  # 진행 중인 feature_key
+        # 음성 녹음 상태 (Phase 9-2)
+        self._recorder: object | None = None
+        self._whisper_worker: object | None = None
+        self._recording_timer: QTimer | None = None
         # 0=오른쪽, 1=왼쪽 가장자리
         self.side = "left" if db.get_setting_int("side", 0) == 1 else "right"
 
@@ -1424,11 +1437,17 @@ class SlideMemoWindow(QWidget):
             self.format_toolbar.ensurePolished()
             self.editor.ensurePolished()
             self.title_input.ensurePolished()
+            # 9-1 클립보드 배너도 polish 미리 (첫 expand에 paint 비용 ↓)
+            if hasattr(self, "_clipboard_banner"):
+                self._clipboard_banner.ensurePolished()
             self.body.layout().activate()
             warm_size = self._expanded_geometry().size()
             if warm_size.width() > 0 and warm_size.height() > 0:
                 pix = QPixmap(warm_size)
                 pix.fill(Qt.GlobalColor.transparent)
+                # 두 번 render — 첫 패스는 layout 계산, 둘째 패스는 polish 완료 상태
+                self.body.render(pix)
+                self.body.layout().activate()
                 self.body.render(pix)
         except Exception:
             pass  # warm-up은 실패해도 앱 동작에 무관
@@ -1972,6 +1991,155 @@ class SlideMemoWindow(QWidget):
         self._ai_status_lbl.hide()
         self._show_toast("AI 작업이 취소되었습니다.")
 
+    # ----- 음성 녹음 (Phase 9-2) -----
+    def toggle_recording(self) -> None:
+        if self._recorder is not None and getattr(self._recorder, "is_recording", False):
+            self._stop_recording()
+        else:
+            self._start_recording()
+
+    def _start_recording(self) -> None:
+        if self.db.get_setting_int("recording_enabled", 0) != 1:
+            self._show_toast("음성 녹음 기능이 비활성화돼 있습니다. 설정 → AI 탭.")
+            return
+        if self.db.get_setting_str("ai_enabled", "0") != "1":
+            self._show_toast("AI 기능을 먼저 활성화하세요.")
+            return
+        from ai_provider import load_api_key
+        api_key = load_api_key("openai")
+        if not api_key:
+            self._show_toast(
+                "녹음 기능에는 OpenAI 키가 필요합니다. 설정 → AI 탭에서 등록하세요."
+            )
+            return
+        from audio_recorder import AudioRecorder, has_microphone
+        ok, msg = has_microphone()
+        if not ok:
+            self._show_toast(msg)
+            return
+        max_s = self.db.get_setting_int("recording_max_seconds", 300)
+        self._recorder = AudioRecorder(max_seconds=max_s)
+        try:
+            self._recorder.start()
+        except Exception as e:
+            self._show_toast(f"녹음 시작 실패: {e}")
+            self._recorder = None
+            return
+        self._update_mic_button_state(recording=True)
+        self._recording_timer = QTimer(self)
+        self._recording_timer.timeout.connect(self._tick_recording)
+        self._recording_timer.start(1000)
+
+    def _tick_recording(self) -> None:
+        if self._recorder is None or not self._recorder.is_recording:
+            return
+        elapsed = self._recorder.elapsed_seconds
+        max_s = self.db.get_setting_int("recording_max_seconds", 300)
+        self._update_mic_button_state(recording=True, elapsed=elapsed)
+        if elapsed >= max_s:
+            self._show_toast("최대 녹음 시간에 도달했습니다.")
+            self._stop_recording()
+
+    def _stop_recording(self) -> None:
+        if self._recording_timer is not None:
+            self._recording_timer.stop()
+            self._recording_timer = None
+        if self._recorder is None:
+            self._update_mic_button_state(recording=False)
+            return
+        # 임시 파일 경로
+        from datetime import datetime
+        from database import APP_DIR
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_path = APP_DIR / "temp" / f"recording_{ts}.wav"
+        try:
+            saved = self._recorder.stop_and_save(temp_path)
+        except Exception as e:
+            self._show_toast(f"녹음 저장 실패: {e}")
+            self._recorder = None
+            self._update_mic_button_state(recording=False)
+            return
+        self._recorder = None
+        self._update_mic_button_state(recording=False)
+        if saved is None:
+            self._show_toast("녹음된 오디오가 없습니다.")
+            return
+        # Whisper 호출
+        from ai_provider import load_api_key
+        api_key = load_api_key("openai")
+        if not api_key:
+            self._show_toast(
+                "OpenAI 키가 없어 변환을 건너뛰었습니다. 녹음 파일은 보존됨."
+            )
+            return
+        from audio_recorder import WhisperWorker
+        self._whisper_worker = WhisperWorker(saved, api_key, parent=self)
+        self._whisper_worker.finished.connect(
+            lambda text: self._on_whisper_finished(text, saved)
+        )
+        self._whisper_worker.errored.connect(
+            lambda msg: self._on_whisper_error(msg, saved)
+        )
+        self._show_ai_progress("✨ 음성 변환 중...")
+        self._whisper_worker.start()
+
+    def _on_whisper_finished(self, text: str, audio_path: Path) -> None:
+        self._ai_status_lbl.hide()
+        keep_audio = self.db.get_setting_int("recording_keep_audio", 0) == 1
+        attached_name: str | None = None
+        if keep_audio:
+            from database import APP_DIR
+            audio_dir = APP_DIR / "audio"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            new_path = audio_dir / audio_path.name
+            try:
+                audio_path.replace(new_path)
+                attached_name = new_path.name
+            except OSError:
+                attached_name = None
+        else:
+            try:
+                audio_path.unlink()
+            except OSError:
+                pass
+        # 새 메모로
+        from datetime import datetime
+        title = f"음성 메모 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        body = text if text else "(변환된 텍스트 없음)"
+        if attached_name:
+            body += f"\n\n[🎤 {attached_name}]"
+        self.save_now()
+        if self.trash_mode:
+            self._exit_trash_mode()
+        memo = self.db.create()
+        self._load_memo(memo)
+        self.title_input.setText(title)
+        self.editor.setPlainText(body)
+        self._refresh_memo_tabs()
+        self._update_tabs_selected()
+        self.expand()
+
+    def _on_whisper_error(self, msg: str, audio_path: Path) -> None:
+        self._ai_status_lbl.hide()
+        self._show_toast(f"Whisper 오류: {msg} (녹음 파일 보존됨)")
+
+    def _update_mic_button_state(self, *, recording: bool, elapsed: int = 0) -> None:
+        if not hasattr(self, "format_toolbar"):
+            return
+        btn = getattr(self.format_toolbar, "mic_btn", None)
+        if btn is None:
+            return
+        if recording:
+            m, s = divmod(elapsed, 60)
+            btn.setToolTip(f"녹음 중... {m:02d}:{s:02d} — 다시 클릭하면 종료")
+            btn.setStyleSheet(
+                "QToolButton#fmtBtn { background-color: #f38ba8; "
+                "border-radius: 3px; }"
+            )
+        else:
+            btn.setToolTip("음성 녹음 (시작/종료)")
+            btn.setStyleSheet("")
+
     def _on_ai_finished(self, feature_key: str, result: str, tokens: int, show_preview: bool) -> None:
         self._ai_pending = None
         self._ai_status_lbl.hide()
@@ -2233,14 +2401,16 @@ class SlideMemoWindow(QWidget):
             self._check_clipboard()
             return
         self.is_expanded = True
-        # 윈도우 폭/위치는 즉시 펼침 사이즈로 (tab_column 위치는 변함 없음)
-        self.setGeometry(self._expanded_geometry())
-        # body.show() 전에 layout을 강제 activate해 FlowLayout이 정상 폭 기준으로
-        # 첫 패스를 계산하게 한다. 그렇지 않으면 width=0 짧은 순간 wrap된 큰 높이가
-        # 부모 layout으로 전파되어 메모 탭이 잠깐 어긋난 위치에 그려진다.
+        # body를 먼저 show + layout activate해 자식 위젯 위치를 확정한 다음
+        # 윈도우 폭을 확장. 순서가 반대면 native window가 새 폭으로 paint될 때
+        # tab_column이 아직 옛 위치라 "공중부양"으로 보인다.
         self.body.layout().activate()
         self.body.show()
+        self.setGeometry(self._expanded_geometry())
         self._update_handles()
+        # 명시적으로 tab_column을 최상위로 + 즉시 repaint
+        self.tab_column.raise_()
+        self.container.repaint()
         # body opacity 0 → 1 페이드 인
         self.fade_anim.stop()
         self.fade_anim.setStartValue(self.body_opacity.opacity())
