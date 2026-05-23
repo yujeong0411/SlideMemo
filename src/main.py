@@ -3418,11 +3418,20 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Slide Memo")
-    # 앱 전역 UI 폰트 — 시스템에 Pretendard가 있으면 사용, 없으면 Qt가 자동 fallback
-    # (메모 본문/제목/탭의 폰트는 _setup_fonts와 _apply_app_font로 별도 관리됨)
-    _families = set(QFontDatabase.families())
-    if "Pretendard" in _families:
-        app.setFont(QFont("Pretendard", 9))
+    # 앱 전역 UI 폰트 — assets/fonts/의 번들 Pretendard를 우선 등록.
+    # 시스템에도 없고 번들도 못 찾으면 Qt가 OS 기본으로 fallback.
+    _fonts_dir = _resource_path("assets/fonts")
+    if _fonts_dir.exists():
+        for _font_file in _fonts_dir.glob("*.otf"):
+            QFontDatabase.addApplicationFont(str(_font_file))
+        for _font_file in _fonts_dir.glob("*.ttf"):
+            QFontDatabase.addApplicationFont(str(_font_file))
+    if "Pretendard" in set(QFontDatabase.families()):
+        _app_font = QFont("Pretendard", 9)
+        # full hinting — fractional DPI 배율(125%/150% 등)에서 텍스트 또렷도 향상
+        _app_font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        _app_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        app.setFont(_app_font)
 
     app_icon = load_app_icon()
     if app_icon is not None:
