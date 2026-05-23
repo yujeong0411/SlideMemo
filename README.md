@@ -74,24 +74,26 @@ OpenAI Whisper API로 음성 → 텍스트 변환. 마이크 권한 + OpenAI 키
 
 ## 3. 설치 및 실행
 
-### 필요한 것
+### A. 인스톨러로 설치 (권장, Windows)
 
-- Python 3.12 이상
-- [uv](https://docs.astral.sh/uv/) (Python 패키지 매니저)
+배포된 `SlideMemo-Setup-vX.Y.Z.exe`를 더블클릭하면 마법사 단계 없이 진행 바만 보였다가 자동으로 실행됩니다.
 
-### 설치
+- 설치 위치: `%LOCALAPPDATA%\Programs\SlideMemo\` (UAC 프롬프트 없음, 관리자 권한 불필요)
+- 시작 메뉴 + 바탕화면 바로가기 자동 생성
+- 제거: 설정 → 앱 → 설치된 앱 → "Slide Memo" → 제거
+
+### B. 소스에서 실행 (개발자)
+
+필요한 것: Python 3.12 이상, [uv](https://docs.astral.sh/uv/)
 
 ```bash
 uv sync
-```
-
-### 실행
-
-```bash
 uv run python src/main.py
 ```
 
-처음 실행하면 화면 가장자리(기본: 오른쪽)에 세로 탭이 표시되고, 메모가 없으면 빈 메모 1개가 자동 생성됩니다.
+### 첫 실행
+
+화면 가장자리(기본: 오른쪽)에 세로 탭이 표시되고, 메모가 없으면 빈 메모 1개가 자동 생성됩니다.
 
 데이터 폴더 `~/.memo_slide/`가 자동으로 만들어집니다 (`~` = `C:\Users\<사용자명>`).
 
@@ -243,9 +245,9 @@ AI 기능은 기본 비활성화 상태이며, 사용하려면 본인 API 키가
 설정 → 일반 탭 → "메모 앱 펼칠 때 클립보드 자동 감지" 체크 해제.
 또는 알림이 떴을 때 ✕ 버튼을 누르면 같은 내용은 다시 안 뜹니다 (현재 세션 한정).
 
-### 윈도우 폰트가 어색합니다
+### 앱 전체 폰트가 다르게 보입니다
 
-앱 전역 폰트는 시스템에 Pretendard가 있으면 사용, 없으면 OS 기본(Windows의 Segoe UI/Malgun Gothic)으로 fallback 됩니다. Pretendard 설치는 https://github.com/orioncactus/pretendard 참고.
+앱 전역 폰트는 번들된 Pretendard를 사용합니다 (시스템 설치 불필요). 만약 다르게 보인다면 `assets/fonts/Pretendard-Regular.otf` / `Pretendard-Bold.otf`가 빠진 빌드일 가능성이 있어 OS 기본(Windows의 Segoe UI/Malgun Gothic)으로 fallback 된 상태입니다.
 
 ### DB가 손상된 것 같습니다
 
