@@ -11,10 +11,12 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSlider,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -97,19 +99,66 @@ class SettingsDialog(QDialog):
     # ── 일반 탭 ──────────────────────────────────────────────────
     def _build_general_tab(self) -> QWidget:
         w = QWidget()
-        form = QFormLayout(w)
-        form.setContentsMargins(16, 16, 16, 16)
-        form.setVerticalSpacing(12)
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(12)
 
+        # 앱 위치
+        side_form = QFormLayout()
+        side_form.setVerticalSpacing(8)
         self._side_combo = QComboBox()
         self._side_combo.addItem("오른쪽 가장자리", 0)
         self._side_combo.addItem("왼쪽 가장자리", 1)
-        form.addRow("앱 위치:", self._side_combo)
-
+        side_form.addRow("앱 위치:", self._side_combo)
         note = QLabel("※ 위치 변경은 앱 재시작 후 적용됩니다.")
         note.setStyleSheet("color: gray; font-size: 9pt;")
-        form.addRow("", note)
+        side_form.addRow("", note)
+        outer.addLayout(side_form)
+
+        # 인덱스 탭 설정 그룹
+        outer.addWidget(self._build_tab_geometry_group())
+
+        outer.addStretch(1)
         return w
+
+    def _build_tab_geometry_group(self) -> QGroupBox:
+        group = QGroupBox("인덱스 탭 설정")
+        form = QFormLayout(group)
+        form.setVerticalSpacing(10)
+
+        # 가로 폭 슬라이더 (12 ~ 60 px) — 각 메모 탭(슬라이드 노출 폭)
+        self._tab_width_slider = QSlider(Qt.Orientation.Horizontal)
+        self._tab_width_slider.setRange(12, 60)
+        self._tab_width_slider.setSingleStep(1)
+        self._tab_width_slider.setPageStep(4)
+        self._tab_width_lbl = QLabel("30 px")
+        self._tab_width_lbl.setMinimumWidth(48)
+        self._tab_width_slider.valueChanged.connect(
+            lambda v: self._tab_width_lbl.setText(f"{v} px")
+        )
+        width_row = QHBoxLayout()
+        width_row.setContentsMargins(0, 0, 0, 0)
+        width_row.addWidget(self._tab_width_slider, stretch=1)
+        width_row.addWidget(self._tab_width_lbl)
+        form.addRow("가로 폭:", width_row)
+
+        # 세로 길이 슬라이더 (60 ~ 200 px) — 각 메모 탭 하나의 높이
+        self._memo_tab_height_slider = QSlider(Qt.Orientation.Horizontal)
+        self._memo_tab_height_slider.setRange(60, 200)
+        self._memo_tab_height_slider.setSingleStep(1)
+        self._memo_tab_height_slider.setPageStep(10)
+        self._memo_tab_height_lbl = QLabel("116 px")
+        self._memo_tab_height_lbl.setMinimumWidth(48)
+        self._memo_tab_height_slider.valueChanged.connect(
+            lambda v: self._memo_tab_height_lbl.setText(f"{v} px")
+        )
+        height_row = QHBoxLayout()
+        height_row.setContentsMargins(0, 0, 0, 0)
+        height_row.addWidget(self._memo_tab_height_slider, stretch=1)
+        height_row.addWidget(self._memo_tab_height_lbl)
+        form.addRow("세로 길이:", height_row)
+
+        return group
 
     # ── AI 탭 ────────────────────────────────────────────────────
     def _build_ai_tab(self) -> QWidget:
@@ -243,6 +292,14 @@ class SettingsDialog(QDialog):
         side = self.db.get_setting_int("side", 0)
         self._side_combo.setCurrentIndex(1 if side == 1 else 0)
 
+        # 인덱스 탭 설정 (값/범위는 main.py 상수와 동일)
+        tab_w = max(12, min(self.db.get_setting_int("tab_width", 30), 60))
+        self._tab_width_slider.setValue(tab_w)
+        self._tab_width_lbl.setText(f"{tab_w} px")
+        tab_h = max(60, min(self.db.get_setting_int("memo_tab_height", 116), 200))
+        self._memo_tab_height_slider.setValue(tab_h)
+        self._memo_tab_height_lbl.setText(f"{tab_h} px")
+
         # AI
         enabled = self.db.get_setting_str(AI_KEY_ENABLED, "0") == "1"
         provider = self.db.get_setting_str(AI_KEY_PROVIDER, "anthropic")
@@ -367,5 +424,11 @@ class SettingsDialog(QDialog):
             AI_KEY_SHOW_PREVIEW, "1" if self._preview_chk.isChecked() else "0"
         )
         self.db.set_setting_int("side", self._side_combo.currentData())
+
+        # 인덱스 탭 설정
+        self.db.set_setting_int("tab_width", self._tab_width_slider.value())
+        self.db.set_setting_int(
+            "memo_tab_height", self._memo_tab_height_slider.value()
+        )
 
         self.accept()

@@ -66,12 +66,16 @@ from database import DEFAULT_COLOR, IMAGES_DIR, Memo, MemoDatabase
 
 
 # ----- 상수 -----
-TAB_WIDTH = 34          # 인덱스 가로
+TAB_WIDTH = 30          # 인덱스 가로 (기본값; 설정에서 조절)
+TAB_WIDTH_MIN = 12
+TAB_WIDTH_MAX = 60
 EXPANDED_WIDTH = 520
 HEIGHT_RATIO = 0.70
 ANIM_DURATION = 150  # body 페이드 시간
 AUTOSAVE_DELAY = 600
-MEMO_TAB_HEIGHT = 116   # 인덱스 세로
+MEMO_TAB_HEIGHT = 116   # 인덱스 세로 (기본값; 설정에서 조절)
+MEMO_TAB_HEIGHT_MIN = 60
+MEMO_TAB_HEIGHT_MAX = 200
 NEW_TAB_HEIGHT = 44
 
 # 리사이즈
@@ -410,6 +414,7 @@ class MemoTabButton(QPushButton):
     """메모별 색깔 탭. 세로 회전한 제목을 표시."""
 
     side = "right"  # 클래스 변수: 윈도우가 좌/우 전환 시 갱신
+    button_height = MEMO_TAB_HEIGHT  # 클래스 변수: 설정에서 조절 시 갱신
 
     def __init__(self, memo: Memo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -424,7 +429,7 @@ class MemoTabButton(QPushButton):
             self._fg = _text_color_for(self._bg)
         self.memo_title = memo.title.strip() or "(제목 없음)"
         self.is_pinned = memo.is_pinned
-        self.setFixedHeight(MEMO_TAB_HEIGHT)
+        self.setFixedHeight(MemoTabButton.button_height)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         tip = ("📌 " if self.is_pinned else "") + self.memo_title
         self.setToolTip(tip)
@@ -1014,6 +1019,7 @@ class SlideMemoWindow(QWidget):
         # 0=오른쪽, 1=왼쪽 가장자리
         self.side = "left" if db.get_setting_int("side", 0) == 1 else "right"
 
+        self._load_tab_geometry()  # tab_width 등을 _setup_window/_build_ui 전에 결정
         self._setup_window()
         self._setup_fonts()
         self._build_ui()
@@ -1032,6 +1038,14 @@ class SlideMemoWindow(QWidget):
         self._refresh_ai_bar()
 
     # ----- setup -----
+    def _load_tab_geometry(self) -> None:
+        """DB에서 인덱스 탭 폭/각 탭 높이 로드. 범위 밖 값은 clamp."""
+        w = self.db.get_setting_int("tab_width", TAB_WIDTH)
+        self.tab_width = max(TAB_WIDTH_MIN, min(w, TAB_WIDTH_MAX))
+        h = self.db.get_setting_int("memo_tab_height", MEMO_TAB_HEIGHT)
+        self.memo_tab_height = max(MEMO_TAB_HEIGHT_MIN, min(h, MEMO_TAB_HEIGHT_MAX))
+        MemoTabButton.button_height = self.memo_tab_height
+
     def _setup_window(self) -> None:
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -1041,9 +1055,9 @@ class SlideMemoWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet(STYLE)
         self.setWindowTitle("Slide Memo")
-        # 폭이 24~520 사이로 변경 가능해야 함 (접힘=24, 펼침=520).
+        # 폭이 tab_width~사용자 드래그 폭 사이로 변경 가능 (접힘=tab_width, 펼침=user_width).
         # 화면 안에 항상 전체가 들어오도록 폭 자체가 슬라이드함.
-        self.setMinimumWidth(TAB_WIDTH)
+        self.setMinimumWidth(self.tab_width)
         # setMaximumWidth 안 둠 - 사용자가 좌측 드래그로 키울 수 있어야 함
 
     def _setup_fonts(self) -> None:
@@ -1060,7 +1074,7 @@ class SlideMemoWindow(QWidget):
 
         self.container = QFrame(self)
         self.container.setObjectName("mainContainer")
-        self.container.setMinimumWidth(TAB_WIDTH)
+        self.container.setMinimumWidth(self.tab_width)
         outer.addWidget(self.container)
 
         root = QHBoxLayout(self.container)
@@ -1209,7 +1223,7 @@ class SlideMemoWindow(QWidget):
         # ---- 우측 탭 컬럼 (항상 보임) ----
         self.tab_column = QWidget(self.container)
         self.tab_column.setObjectName("tabColumn")
-        self.tab_column.setFixedWidth(TAB_WIDTH)
+        self.tab_column.setFixedWidth(self.tab_width)
         col_layout = QVBoxLayout(self.tab_column)
         col_layout.setContentsMargins(0, 0, 0, 0)
         col_layout.setSpacing(0)
@@ -1302,7 +1316,7 @@ class SlideMemoWindow(QWidget):
             return
         w = self.container.width()
         h = self.container.height()
-        body_w = max(0, w - TAB_WIDTH)
+        body_w = max(0, w - self.tab_width)
         grip_h = max(0, h - 2 * RESIZE_GRIP)
         show = self.is_expanded
         if self.side == "right":
@@ -1315,8 +1329,8 @@ class SlideMemoWindow(QWidget):
         else:
             # 본문이 우측 → 우측 가장자리가 폭 조절 핸들
             self.handle_right.setGeometry(w - RESIZE_GRIP, RESIZE_GRIP, RESIZE_GRIP, grip_h)
-            self.handle_top.setGeometry(TAB_WIDTH, 0, body_w, RESIZE_GRIP)
-            self.handle_bottom.setGeometry(TAB_WIDTH, h - RESIZE_GRIP, body_w, RESIZE_GRIP)
+            self.handle_top.setGeometry(self.tab_width, 0, body_w, RESIZE_GRIP)
+            self.handle_bottom.setGeometry(self.tab_width, h - RESIZE_GRIP, body_w, RESIZE_GRIP)
             self.handle_right.setVisible(show)
             self.handle_left.setVisible(False)
         self.handle_top.setVisible(show)
@@ -1350,6 +1364,7 @@ class SlideMemoWindow(QWidget):
         from settings_dialog import SettingsDialog
         dlg = SettingsDialog(self.db, self)
         dlg.exec()
+        self.apply_tab_geometry_settings()
         self._refresh_ai_bar()
 
     def _refresh_ai_bar(self) -> None:
@@ -1621,7 +1636,7 @@ class SlideMemoWindow(QWidget):
 
     def _save_user_size(self) -> None:
         g = self.geometry()
-        # 접힌 상태에선 폭이 TAB_WIDTH라 user_width를 덮어쓰면 안 됨
+        # 접힌 상태에선 폭이 tab_width라 user_width를 덮어쓰면 안 됨
         # (접힌 채 세로 이동 그립을 드래그한 경우)
         if self.is_expanded:
             self.user_width = g.width()
@@ -1630,6 +1645,24 @@ class SlideMemoWindow(QWidget):
         self.db.set_setting_int("window_width", self.user_width)
         self.db.set_setting_int("window_height", self.user_height)
         self.db.set_setting_int("window_y", self.user_y)
+
+    def apply_tab_geometry_settings(self) -> None:
+        """설정 다이얼로그 OK 후 호출. 인덱스 탭 폭/각 탭 높이를 DB에서 재로드해 반영.
+        접힌 상태면 윈도우 폭도 즉시 반영, 펼친 상태면 다음 접기 때 반영.
+        """
+        self._load_tab_geometry()
+        # 폭 즉시 반영 (탭 컬럼 + 컨테이너 최소 폭)
+        self.tab_column.setFixedWidth(self.tab_width)
+        self.container.setMinimumWidth(self.tab_width)
+        self.setMinimumWidth(self.tab_width)
+        # 각 메모 탭 높이 갱신 → 탭 다시 그리기
+        MemoTabButton.button_height = self.memo_tab_height
+        self._refresh_memo_tabs()
+        self._update_tabs_selected()
+        # 접힌 상태만 즉시 반영. 펼친 상태는 _collapsed_geometry가 다음 접기 때 새 값 사용.
+        if not self.is_expanded:
+            self.setGeometry(self._collapsed_geometry())
+        self._update_handles()
 
     def _expanded_geometry(self) -> QRect:
         rect = self._screen_rect()
@@ -1641,12 +1674,12 @@ class SlideMemoWindow(QWidget):
 
     def _collapsed_geometry(self) -> QRect:
         rect = self._screen_rect()
-        # 폭 자체를 TAB_WIDTH로 만들어 화면 가장자리에 탭만 노출.
+        # 폭 자체를 tab_width로 만들어 화면 가장자리에 탭만 노출.
         if self.side == "right":
-            x = rect.right() - TAB_WIDTH + 1
+            x = rect.right() - self.tab_width + 1
         else:
             x = rect.x()
-        return QRect(x, self.user_y, TAB_WIDTH, self.user_height)
+        return QRect(x, self.user_y, self.tab_width, self.user_height)
 
     def _position_collapsed(self) -> None:
         self.setGeometry(self._collapsed_geometry())
@@ -2207,6 +2240,7 @@ def make_tray_icon(window: SlideMemoWindow, icon: QIcon | None = None) -> QSyste
     settings_act = QAction("⚙ 설정", menu)
     def _open_settings_from_tray() -> None:
         SettingsDialog(window.db, window).exec()
+        window.apply_tab_geometry_settings()
         window._refresh_ai_bar()
 
     settings_act.triggered.connect(_open_settings_from_tray)
