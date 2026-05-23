@@ -591,6 +591,9 @@ class MemoTabButton(QPushButton):
     def update_style(self, selected: bool) -> None:
         # stylesheet은 배경만 담당. 선택 인디케이터는 paintEvent에서 직접 그림.
         # 라운드는 0 — 메모 탭들을 한 띠로 보이게 한다.
+        # 같은 selected 값이면 setStyleSheet polish 다시 안 호출 (성능).
+        if getattr(self, "_style_applied", False) and self._selected == selected:
+            return
         self._selected = selected
         self.setStyleSheet(
             f"QPushButton {{"
@@ -599,6 +602,14 @@ class MemoTabButton(QPushButton):
             f"  border-radius: 0;"
             f"}}"
         )
+        self._style_applied = True
+        self.update()
+
+    def set_selected_only(self, selected: bool) -> None:
+        """stylesheet 재적용 없이 인디케이터 표시만 토글 — expand/collapse 시 호출."""
+        if self._selected == selected:
+            return
+        self._selected = selected
         self.update()
 
 
@@ -1077,15 +1088,19 @@ class FormatToolbar(QWidget):
         "QComboBox { color: #cdd6f4; background: #45475a;"
         " border: 1px solid #585b70; border-radius: 3px;"
         " padding: 2px 6px; font-size: 8pt; }"
+        # editable 콤보(크기 입력창)의 내부 QLineEdit — 별도 명시 안 하면 시스템
+        # 기본 색이 적용되어 어두운 배경에 어두운 글자가 되어 안 보임.
+        "QComboBox QLineEdit { color: #cdd6f4; background: transparent;"
+        " border: none; padding: 0; selection-background-color: #585b70; }"
         "QComboBox::drop-down { border: none; width: 16px; }"
         # 드롭다운(목록)은 라이트 — 글꼴 이름이 또렷이 보이게
         "QComboBox QAbstractItemView { color: #1e1e2e;"
         " background: #ffffff; outline: 0;"
         " selection-background-color: #cdd6f4; selection-color: #1e1e2e; }"
         "QComboBox QAbstractItemView QScrollBar:vertical {"
-        " background: #f0f0f0; width: 12px; margin: 0; }"
+        " background: rgba(0,0,0,0.04); width: 6px; margin: 0; }"
         "QComboBox QAbstractItemView QScrollBar::handle:vertical {"
-        " background: #888888; border-radius: 4px; min-height: 20px; }"
+        " background: rgba(0,0,0,0.35); border-radius: 3px; min-height: 20px; }"
         "QComboBox QAbstractItemView QScrollBar::add-line:vertical,"
         " QComboBox QAbstractItemView QScrollBar::sub-line:vertical { height: 0; }"
     )
@@ -1118,10 +1133,13 @@ class FormatToolbar(QWidget):
         form.addRow(family_lbl, self._font_family_combo)
 
         self._font_size_combo = QComboBox()
-        self._font_size_combo.setEditable(True)
-        self._font_size_combo.setFixedWidth(42)
+        # QMenu 안의 editable 콤보는 키 입력을 메뉴가 가로채 직접 입력 불가
+        # → 비편집 모드 + 사이즈 옵션 촘촘 + 아래 "직접 입력..." 액션으로 보조
+        self._font_size_combo.setEditable(False)
+        self._font_size_combo.setFixedWidth(48)
         self._font_size_combo.setStyleSheet(self._FONT_COMBO_STYLE)
-        for s in (8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48):
+        for s in (8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24,
+                  26, 28, 32, 36, 40, 48, 56, 64, 72):
             self._font_size_combo.addItem(str(s))
         self._font_size_combo.currentTextChanged.connect(self._apply_font_size)
         form.addRow(size_lbl, self._font_size_combo)
@@ -1685,8 +1703,8 @@ class SlideMemoWindow(QWidget):
         # 위젯 기본 폰트 (새 입력에도 적용)
         memo_font = QFont(family, size)
         self.editor.setFont(memo_font)
-        # 제목 — bold 유지하며 적용
-        title_font = QFont(family, size)
+        # 제목 — bold + size는 항상 13pt 고정 (본문만 크기 따라가게)
+        title_font = QFont(family, 13)
         title_font.setBold(True)
         self.title_input.setFont(title_font)
         # 메모 객체 + DB 저장 + 탭 갱신
@@ -1824,8 +1842,8 @@ class SlideMemoWindow(QWidget):
         self.title_input.setObjectName("titleInput")
         self.title_input.setPlaceholderText("제목")
         self.title_input.textChanged.connect(self._on_text_changed)
-        # 제목 폰트: 글로벌 family + bold
-        title_font = QFont(self.editor_font.family(), self.editor_font.pointSize())
+        # 제목 폰트: 글로벌 family + bold, size는 13pt 고정 (본문 크기와 무관)
+        title_font = QFont(self.editor_font.family(), 13)
         title_font.setBold(True)
         self.title_input.setFont(title_font)
 
@@ -2612,6 +2630,8 @@ class SlideMemoWindow(QWidget):
             self._check_clipboard()
             return
         self.is_expanded = True
+        # 펼침 — 현재 메모의 인디케이터 다시 표시
+        self._update_tabs_selected()
         # body를 먼저 show + layout activate해 자식 위젯 위치를 확정한 다음
         # 윈도우 폭을 확장. 순서가 반대면 native window가 새 폭으로 paint될 때
         # tab_column이 아직 옛 위치라 "공중부양"으로 보인다.
@@ -2639,6 +2659,8 @@ class SlideMemoWindow(QWidget):
         if exit_trash and self.trash_mode:
             self._exit_trash_mode()  # 접을 때 휴지통 모드 해제
         self.is_expanded = False
+        # 모든 메모 탭의 인디케이터 제거 (접힘 상태에서는 아무 것도 선택돼있지 않게)
+        self._update_tabs_selected()
         # body opacity → 0 페이드 아웃. 끝나면 _on_fade_done에서 윈도우 축소.
         self.fade_anim.stop()
         self.fade_anim.setStartValue(self.body_opacity.opacity())
@@ -2660,7 +2682,12 @@ class SlideMemoWindow(QWidget):
             if w is not None:
                 w.deleteLater()
 
-        current_id = self.current_memo.id if self.current_memo else None
+        # 접힘(collapse) 상태면 인디케이터 표시 안 함
+        current_id = (
+            self.current_memo.id
+            if (self.current_memo and self.is_expanded)
+            else None
+        )
         for memo in memos:
             btn = MemoTabButton(memo)
             btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -2937,11 +2964,17 @@ class SlideMemoWindow(QWidget):
                 self._preview_trashed(neighbor.id)
 
     def _update_tabs_selected(self) -> None:
-        current_id = self.current_memo.id if self.current_memo else None
+        # 접힘(collapse) 상태에서는 인디케이터를 보이지 않게 — 펼친 메모가 없으니
+        # 어떤 탭에도 selected 표시가 남지 않도록.
+        if not self.is_expanded:
+            current_id = None
+        else:
+            current_id = self.current_memo.id if self.current_memo else None
         for i in range(self.tabs_layout.count()):
             w = self.tabs_layout.itemAt(i).widget()
             if isinstance(w, MemoTabButton):
-                w.update_style(selected=(w.memo_id == current_id))
+                # stylesheet 재적용 비용 없이 인디케이터 표시만 토글
+                w.set_selected_only(w.memo_id == current_id)
 
     def select_memo(self, memo_id: int) -> None:
         # 이미 선택된 메모를 다시 누르면 토글 (열려있으면 접고, 접혀있으면 펴기)
@@ -2971,7 +3004,8 @@ class SlideMemoWindow(QWidget):
         size = memo.font_size or self.editor_font.pointSize() or 11
         editor_font = QFont(family, size)
         self.editor.setFont(editor_font)
-        title_font = QFont(family, size)
+        # 제목은 본문 크기와 무관하게 13pt 고정 (family만 일치)
+        title_font = QFont(family, 13)
         title_font.setBold(True)
         self.title_input.setFont(title_font)
         # content가 HTML이면 setHtml, 옛 plain text 메모면 setPlainText
