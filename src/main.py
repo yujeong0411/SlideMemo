@@ -2787,14 +2787,21 @@ class SlideMemoWindow(QWidget):
         self.search_input.show()
         self.sort_combo.show()
         self.new_tab_btn.show()
-        # 휴지통 진입 전에 보던 메모로 에디터 복원
+        # 휴지통 진입 전에 보던 메모로 에디터 복원.
+        # 그 메모가 그 사이 삭제됐거나 아예 메모가 0개면 활성 메모를 보장한다.
+        # (init의 `if not db.list_all(): db.create()` 와 같은 원칙 — 일반 모드는
+        # 항상 최소 1개. 안 그러면 휴지통 비운 직후 인덱스는 비었는데 본문은
+        # 빈 에디터가 떠 있는 어색한 상태가 됨.)
+        restored = False
         if self.current_memo is not None:
             try:
                 self._load_memo(self.db.get(self.current_memo.id))
+                restored = True
             except KeyError:
-                self._clear_editor()
-        else:
-            self._clear_editor()
+                pass
+        if not restored:
+            active = self.db.list_all(sort=self._current_sort_key())
+            self._load_memo(active[0] if active else self.db.create())
         self._refresh_memo_tabs()
         self._update_tabs_selected()
 
