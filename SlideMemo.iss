@@ -1,6 +1,6 @@
 ; Slide Memo 인스톨러 스크립트 (Inno Setup)
 ; 빌드:  "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" SlideMemo.iss
-; 결과:  installer\SlideMemo-Setup-v0.2.0.exe
+; 결과:  installer\SlideMemo-Setup.exe
 
 #define MyAppName "Slide Memo"
 #define MyAppVersion "0.2.0"
@@ -23,7 +23,7 @@ DisableFinishedPage=yes
 ShowLanguageDialog=no
 CloseApplications=force
 OutputDir=installer
-OutputBaseFilename=SlideMemo-Setup-v{#MyAppVersion}
+OutputBaseFilename=SlideMemo-Setup
 SetupIconFile=logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2

@@ -76,7 +76,7 @@ OpenAI Whisper API로 음성 → 텍스트 변환. 마이크 권한 + OpenAI 키
 
 ### A. 인스톨러로 설치 (권장, Windows)
 
-배포된 `SlideMemo-Setup-vX.Y.Z.exe`를 더블클릭하면 마법사 단계 없이 진행 바만 보였다가 자동으로 실행됩니다.
+배포된 `SlideMemo-Setup.exe`를 더블클릭하면 마법사 단계 없이 진행 바만 보였다가 자동으로 실행됩니다.
 
 - 설치 위치: `%LOCALAPPDATA%\Programs\SlideMemo\` (UAC 프롬프트 없음, 관리자 권한 불필요)
 - 시작 메뉴 + 바탕화면 바로가기 자동 생성

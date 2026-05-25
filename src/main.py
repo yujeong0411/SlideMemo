@@ -3503,6 +3503,13 @@ def main() -> int:
     tray.show()
     window._tray = tray  # 참조 유지
 
+    # PyInstaller 부트로더 splash 닫기 (exe 빌드일 때만 존재)
+    try:
+        import pyi_splash  # type: ignore[import-not-found]
+        pyi_splash.close()
+    except (ImportError, RuntimeError):
+        pass
+
     return app.exec()
 
 
