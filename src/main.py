@@ -9,7 +9,9 @@ from pathlib import Path
 from PyQt6.QtCore import (
     Qt,
     QEasingCurve,
+    QEvent,
     QMimeData,
+    QObject,
     QPoint,
     QPropertyAnimation,
     QRect,
@@ -652,6 +654,9 @@ class RichPasteTextEdit(QTextEdit):
             if isinstance(image, QImage) and not image.isNull():
                 self._insert_image(image)
                 return
+        if source is not None and source.hasText():
+            self.textCursor().insertText(source.text())
+            return
         super().insertFromMimeData(source)
 
     def _insert_image(self, image: QImage) -> None:
@@ -1595,6 +1600,7 @@ class SlideMemoWindow(QWidget):
         # → editor의 QTextDocument 초기화, stylesheet 적용, FlowLayout 첫 패스,
         # 폰트 캐시가 미리 트리거된다.
         self._warm_up_body()
+        QApplication.instance().installEventFilter(self)
 
     def _warm_up_body(self) -> None:
         try:
@@ -2096,12 +2102,23 @@ class SlideMemoWindow(QWidget):
         self.fade_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
         self.fade_anim.finished.connect(self._on_fade_done)
 
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Enter:
+            w = obj
+            while w is not None:
+                if w is self:
+                    self.raise_()
+                    break
+                w = w.parent()
+        return False
+
     def _on_fade_done(self) -> None:
         # 접힘 fade-out 종료 → setMask로 tab_column만 노출. 윈도우 폭은 그대로
         # (펼친 폭). setGeometry 호출 없음 → layered window 깜빡임 없음.
         if not self.is_expanded:
             self.setMask(self._collapsed_mask_region())
             self._update_handles()
+            self.raise_()  # B안: 탭으로 접힌 직후 z-order 재점령
 
     def _open_settings(self) -> None:
         from settings_dialog import SettingsDialog
