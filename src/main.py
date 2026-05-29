@@ -16,13 +16,16 @@ from PyQt6.QtCore import (
     QPropertyAnimation,
     QRect,
     QSize,
+    QThread,
     QTimer,
     QUrl,
+    pyqtSignal,
 )
 from PyQt6.QtGui import (
     QAction,
     QBrush,
     QColor,
+    QDesktopServices,
     QFont,
     QFontDatabase,
     QGuiApplication,
@@ -3477,6 +3480,62 @@ def _set_windows_app_user_model_id() -> None:
         pass  # 구버전 Windows 등 — 아이콘이 기본값으로 떨어지더라도 앱은 정상 동작
 
 
+APP_VERSION = "1.0.4"
+_GITHUB_REPO = "yujeong0411/SlideMemo"
+
+
+class UpdateChecker(QThread):
+    update_available = pyqtSignal(str, str)  # current, latest
+
+    def run(self) -> None:
+        import json
+        import urllib.request
+
+        try:
+            url = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "SlideMemo"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+            tag = data.get("tag_name", "").lstrip("v")
+            if not tag:
+                return
+            current = tuple(int(x) for x in APP_VERSION.split("."))
+            latest = tuple(int(x) for x in tag.split("."))
+            if latest > current:
+                self.update_available.emit(APP_VERSION, tag)
+        except Exception:
+            pass
+
+
+class UpdateDialog(QDialog):
+    def __init__(self, current: str, latest: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("업데이트 알림")
+        self.setMinimumWidth(300)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        msg = QLabel(f"새 버전이 출시되었습니다!\n\n현재  v{current}  →  최신  v{latest}")
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(msg)
+
+        btn_row = QHBoxLayout()
+        download_btn = QPushButton("지금 다운로드")
+        download_btn.setDefault(True)
+        download_btn.clicked.connect(self._open_download)
+        later_btn = QPushButton("나중에")
+        later_btn.clicked.connect(self.reject)
+        btn_row.addWidget(download_btn)
+        btn_row.addWidget(later_btn)
+        layout.addLayout(btn_row)
+
+    def _open_download(self) -> None:
+        QDesktopServices.openUrl(
+            QUrl(f"https://github.com/{_GITHUB_REPO}/releases/latest")
+        )
+        self.accept()
+
+
 def main() -> int:
     try:
         import pyi_splash  # type: ignore[import]
@@ -3555,6 +3614,14 @@ def main() -> int:
     window._tray = tray  # 참조 유지
 
     splash.finish(window)
+
+    _checker = UpdateChecker()
+    _checker.update_available.connect(
+        lambda cur, lat: UpdateDialog(cur, lat, window).exec()
+    )
+    _checker.start()
+    window._update_checker = _checker  # GC 방지
+
     return app.exec()
 
 
